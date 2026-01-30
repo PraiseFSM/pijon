@@ -1,9 +1,11 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                              QScrollArea, QPushButton, QSplitter)
+                              QScrollArea, QPushButton, QSplitter, QInputDialog,
+                              QMessageBox, QFileDialog)
 from PyQt6.QtCore import Qt, QMimeData, QPoint, QRect
 from PyQt6.QtGui import QPainter, QColor, QDrag, QPen, QBrush, QPixmap
 from typing import List, Optional, Tuple
 from pathlib import Path
+from src.models.classroom import Classroom
 
 
 from src.models.furniture import Furniture, SingleDesk, FurnitureType
@@ -212,6 +214,11 @@ class ClassroomGrid(QWidget):
         
         # Enable drag and drop
         self.setAcceptDrops(True)
+
+        # temp variables For dragging furniture around
+        self.selected_furniture: Optional[Furniture] = None
+        self.drag_start_pos: Optional[QPoint] = None
+        self.furniture_original_pos: Optional[Tuple[int, int]] = None
         
         # Set minimum size
         self.update_size()
@@ -383,35 +390,118 @@ class ClassroomGrid(QWidget):
         self.furniture_list.clear()
         self.update()
 
+    def mousePressEvent(self, event):
+        """Handle mouse press - select furniture to move"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Convert to grid coordinates
+            grid_x = event.position().toPoint().x() // self.cell_size
+            grid_y = event.position().toPoint().y() // self.cell_size
+            
+            # Find furniture at this position
+            for furniture in reversed(self.furniture_list):  # Check top furniture first
+                if (grid_x, grid_y) in furniture.get_occupied_cells():
+                    self.selected_furniture = furniture
+                    self.drag_start_pos = event.position().toPoint()
+                    self.furniture_original_pos = furniture.position
+                    print(f"Selected {furniture.furniture_id}")
+                    break
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move - drag furniture"""
+        if self.selected_furniture and self.drag_start_pos:
+            # Calculate new position
+            current_pos = event.position().toPoint()
+            delta_x = (current_pos.x() - self.drag_start_pos.x()) // self.cell_size
+            delta_y = (current_pos.y() - self.drag_start_pos.y()) // self.cell_size
+            
+            new_x = self.furniture_original_pos[0] + delta_x
+            new_y = self.furniture_original_pos[1] + delta_y
+            
+            # Check bounds
+            if (0 <= new_x and 
+                new_x + self.selected_furniture.width <= self.grid_width and
+                0 <= new_y and 
+                new_y + self.selected_furniture.height <= self.grid_height):
+                
+                # Temporarily move furniture to check collision
+                old_pos = self.selected_furniture.position
+                self.selected_furniture.position = (new_x, new_y)
+                
+                # Check collision with other furniture
+                collision = False
+                for furniture in self.furniture_list:
+                    if furniture is not self.selected_furniture:
+                        if set(self.selected_furniture.get_occupied_cells()) & set(furniture.get_occupied_cells()):
+                            collision = True
+                            break
+                
+                if collision:
+                    # Revert position
+                    self.selected_furniture.position = old_pos
+                else:
+                    # Keep new position and repaint
+                    self.update()
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release - finish dragging"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.selected_furniture:
+                print(f"Moved {self.selected_furniture.furniture_id} to {self.selected_furniture.position}")
+                self.selected_furniture = None
+                self.drag_start_pos = None
+                self.furniture_original_pos = None
+                self.update()
+    
+    def keyPressEvent(self, event):
+        """Handle keyboard - delete selected furniture"""
+        if event.key() == Qt.Key.Key_Delete and self.selected_furniture:
+            self.furniture_list.remove(self.selected_furniture)
+            print(f"Deleted {self.selected_furniture.furniture_id}")
+            self.selected_furniture = None
+            self.update()
+
 
 class ClassroomBuilderWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.cell_size = 40  # Central source of truth for cell size
+        self.cell_size = 40
+        self.current_classroom_name = None
         self.init_ui()
     
     def init_ui(self):
-        # Main layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
         # Top toolbar
         toolbar_layout = QHBoxLayout()
+        
+        save_btn = QPushButton("Save Classroom")
+        save_btn.clicked.connect(self.save_classroom)
+        toolbar_layout.addWidget(save_btn)
+        
+        load_btn = QPushButton("Load Classroom")
+        load_btn.clicked.connect(self.load_classroom)
+        toolbar_layout.addWidget(load_btn)
+        
         clear_btn = QPushButton("Clear Classroom")
         clear_btn.clicked.connect(self.clear_classroom)
         toolbar_layout.addWidget(clear_btn)
+        
         toolbar_layout.addStretch()
+        
+        # Classroom name label
+        self.name_label = QLabel("Unsaved Classroom")
+        self.name_label.setStyleSheet("font-weight: bold;")
+        toolbar_layout.addWidget(self.name_label)
         
         layout.addLayout(toolbar_layout)
         
         # Splitter for resizable panels
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # Left side - Furniture Palette (pass cell_size)
         self.palette = FurniturePalette(grid_cell_size=self.cell_size)
         splitter.addWidget(self.palette)
         
-        # Right side - Classroom Grid (pass cell_size)
         self.classroom_grid = ClassroomGrid(
             grid_width=20, 
             grid_height=15, 
@@ -419,14 +509,113 @@ class ClassroomBuilderWidget(QWidget):
         )
         splitter.addWidget(self.classroom_grid)
         
-        # Set initial sizes
         splitter.setSizes([200, 800])
-        
         layout.addWidget(splitter)
+    
+    def save_classroom(self):
+        """Save the current classroom layout"""
+        # Get classroom name
+        if not self.current_classroom_name:
+            name, ok = QInputDialog.getText(
+                self,
+                "Save Classroom",
+                "Enter classroom name:"
+            )
+            
+            if not ok or not name:
+                return
+            
+            self.current_classroom_name = name
+        
+        # Create Classroom object
+        classroom = Classroom(
+            name=self.current_classroom_name,
+            grid_width=self.classroom_grid.grid_width,
+            grid_height=self.classroom_grid.grid_height
+        )
+        
+        # Add all furniture
+        for furniture in self.classroom_grid.get_furniture_list():
+            classroom.add_furniture(furniture)
+        
+        # Save to file
+        try:
+            filepath = classroom.save_to_file()
+            self.name_label.setText(f"Classroom: {self.current_classroom_name}")
+            
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Classroom saved to {filepath}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to save classroom:\n{str(e)}"
+            )
+    
+    def load_classroom(self):
+        """Load a classroom layout from file"""
+        # Get list of saved classrooms
+        saved_classrooms = Classroom.list_saved_classrooms()
+        
+        if not saved_classrooms:
+            QMessageBox.information(
+                self,
+                "No Classrooms",
+                "No saved classrooms found."
+            )
+            return
+        
+        # Let user choose
+        name, ok = QInputDialog.getItem(
+            self,
+            "Load Classroom",
+            "Select classroom to load:",
+            saved_classrooms,
+            0,
+            False
+        )
+        
+        if not ok or not name:
+            return
+        
+        # Load classroom
+        try:
+            filepath = Path("data/classrooms") / f"{name}.json"
+            classroom = Classroom.load_from_file(filepath)
+            
+            # Clear current grid
+            self.classroom_grid.clear_classroom()
+            
+            # Load furniture
+            for furniture in classroom.furniture:
+                self.classroom_grid.furniture_list.append(furniture)
+            
+            self.classroom_grid.furniture_counter = len(classroom.furniture)
+            self.classroom_grid.update()
+            
+            self.current_classroom_name = name
+            self.name_label.setText(f"Classroom: {name}")
+            
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Loaded classroom: {name}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to load classroom:\n{str(e)}"
+            )
     
     def clear_classroom(self):
         """Clear all furniture from classroom"""
         self.classroom_grid.clear_classroom()
+        self.current_classroom_name = None
+        self.name_label.setText("Unsaved Classroom")
         print("Classroom cleared")
     
     def set_cell_size(self, new_cell_size: int):

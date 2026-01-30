@@ -6,7 +6,10 @@ Features:
 
 
 
-Installation
+Installation:
+make sure PyQt6 is installed
+
+
 
 Requirements:
 
@@ -21,6 +24,7 @@ Privacy:
 
 
 Troubleshooting:
+on linux, if some things are invisible, try adding environment variable: export QT_QPA_PLATFORM=xcb
 
 
 Known issues:

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from enum import Enum
 
 class FurnitureType(Enum):
@@ -38,7 +38,7 @@ class Furniture:
 class SingleDesk(Furniture):
     """A standard single-student desk (1x1 with one seat)"""
     
-    def __init__(self, furniture_id: str, position: Tuple[int, int], image_path: str, rotation: int = 0):
+    def __init__(self, furniture_id: str, position: Tuple[int, int], image_path: Optional[str] = None, rotation: int = 0):
         super().__init__(
             furniture_id=furniture_id,
             furniture_type=FurnitureType.SINGLE_DESK,
@@ -62,13 +62,15 @@ class Table(Furniture):
     """A table that can have multiple chairs around it"""
     
     def __init__(self, furniture_id: str, position: Tuple[int, int], 
-                 width: int, height: int, num_seats: int, rotation: int = 0):
+                 width: int, height: int, num_seats: int, 
+                 image_path: Optional[str] = None, rotation: int = 0):
         super().__init__(
             furniture_id=furniture_id,
             furniture_type=FurnitureType.TABLE,
             position=position,
             width=width,
             height=height,
+            image_path=image_path,
             rotation=rotation
         )
         self.num_seats = num_seats
@@ -121,16 +123,17 @@ class TeacherDesk(Furniture):
     """Teacher's desk - no student seats"""
     
     def __init__(self, furniture_id: str, position: Tuple[int, int], 
-                 width: int = 2, height: int = 1, rotation: int = 0):
+                 width: int = 2, height: int = 1, 
+                 image_path: Optional[str] = None, rotation: int = 0):
         super().__init__(
             furniture_id=furniture_id,
             furniture_type=FurnitureType.TEACHER_DESK,
             position=position,
             width=width,
             height=height,
+            image_path=image_path,
             rotation=rotation
         )
-    
     def get_seats(self) -> List['Seat']:
         # Teacher desk has no student seats
         return []
@@ -142,7 +145,12 @@ def create_furniture(furniture_type: FurnitureType, furniture_id: str,
     """Factory function to create furniture of different types"""
     
     if furniture_type == FurnitureType.SINGLE_DESK:
-        return SingleDesk(furniture_id, position, kwargs.get('rotation', 0))
+        return SingleDesk(
+            furniture_id, 
+            position, 
+            image_path=kwargs.get('image_path'),
+            rotation=kwargs.get('rotation', 0)
+        )
     
     elif furniture_type == FurnitureType.TABLE:
         return Table(
@@ -151,6 +159,7 @@ def create_furniture(furniture_type: FurnitureType, furniture_id: str,
             width=kwargs.get('width', 2),
             height=kwargs.get('height', 2),
             num_seats=kwargs.get('num_seats', 4),
+            image_path=kwargs.get('image_path'),
             rotation=kwargs.get('rotation', 0)
         )
     
@@ -160,6 +169,7 @@ def create_furniture(furniture_type: FurnitureType, furniture_id: str,
             position,
             width=kwargs.get('width', 2),
             height=kwargs.get('height', 1),
+            image_path=kwargs.get('image_path'),
             rotation=kwargs.get('rotation', 0)
         )
     
