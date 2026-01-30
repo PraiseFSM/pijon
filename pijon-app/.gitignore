@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# User data - ignore actual classroom data
+data/classrooms/*.json
+data/students/*.csv
+data/arrangements/*.json
+
+# BUT keep example files (notice the !)
+!data/students/sample_students.csv
+!data/classrooms/sample_classroom.json
+
+# OS
+.DS_Store
+Thumbs.db

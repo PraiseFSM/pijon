@@ -2,18 +2,18 @@ Classroom Seating App - Development Todo List
 Phase 1: Foundation & Core Data Models (Week 1-2)
 Project Setup
 
-Set up Python project structure
-Create virtual environment
-Install dependencies (PyQt6/Tkinter, pandas, etc.)
-Set up version control (Git)
+-Set up Python project structure
+-Create virtual environment
+-Install dependencies (PyQt6/Tkinter, pandas, etc.)
+-Set up version control (Git)
 
 Core Data Models
 
-Create Student class (name, ID, metadata)
-Create Desk/Seat class (position, coordinates)
-Create Classroom class (grid system, furniture list)
+-Create Student class (name, ID, metadata)
+-Create Desk/Seat class (position, coordinates)
+-Create Classroom class (grid system, furniture list)
 Implement distance calculation between seats
-Create constraint system (student proximity rules)
+Create constraint system (student proximity rules)  
 
 Import/Export System
 
