@@ -131,7 +131,7 @@ class FurniturePaletteItem(QWidget):
             drag = QDrag(self)
             mime_data = QMimeData()
             
-            mime_data.setText(f"{self.furniture_type.value},{self.furniture_width},{self.furniture_height}")
+            mime_data.setText(f"{self.furniture_type.value},{self.furniture_width},{self.furniture_height},{self.image_path}")
             drag.setMimeData(mime_data)
             
             pixmap = self.create_drag_pixmap()
@@ -267,10 +267,12 @@ class ClassroomGrid(QWidget):
             furniture.height * self.cell_size - 4
         )
         
+    
         # Different colors for different furniture types
         if furniture.image_path:
             # Scale image to fit the furniture rect
-            scaled_image = furniture.image.scaled(
+            furniture_image = self.load_furniture_image(furniture.image_path)
+            scaled_image = furniture_image.scaled(
                 furniture_rect.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
@@ -292,6 +294,22 @@ class ClassroomGrid(QWidget):
         painter.setPen(QPen(QColor(background_color)))
         painter.drawText(furniture_rect, Qt.AlignmentFlag.AlignCenter, furniture.furniture_id.split('_')[-1])
     
+
+    def load_furniture_image(self, image_path) -> Optional[QPixmap]:
+        """Load the furniture image from disk"""
+        image_path = image_path
+        if image_path:
+            pixmap = QPixmap(str(image_path))
+            if not pixmap.isNull():
+                return pixmap
+            else:
+                print(f"Warning: Failed to load image from {image_path}")
+        else:
+            print(f"Warning: No image found for {image_path}")
+        
+        return None
+    
+
     def dragEnterEvent(self, event):
         """Accept drag events"""
         if event.mimeData().hasText():
@@ -305,11 +323,12 @@ class ClassroomGrid(QWidget):
         """Handle furniture drop"""
         if event.mimeData().hasText():
             # Parse furniture info from mime data
+            print({event.mimeData().text()})
             data = event.mimeData().text().split(',')
             furniture_type_str = data[0]
             width = int(data[1])
             height = int(data[2])
-            image_path = str(data[3])
+            image_path = data[3]
             
             # Convert drop position to grid coordinates
             drop_pos = event.position().toPoint()
