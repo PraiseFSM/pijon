@@ -26,9 +26,9 @@ class MainWindow(QMainWindow):
         self.setup_widget.students_imported.connect(self.student_placer.set_students)
         
         # Add tabs
-        self.tabs.addTab(self.setup_widget, "📋 Setup")
-        self.tabs.addTab(self.classroom_builder, "🏫 Build Classroom")
-        self.tabs.addTab(self.student_placer, "👥 Place Students")
+        self.tabs.addTab(self.setup_widget, "Setup")
+        self.tabs.addTab(self.classroom_builder, "Build Classroom")
+        self.tabs.addTab(self.student_placer, "Place Students")
 
 
 def main():
