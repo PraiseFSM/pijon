@@ -10,6 +10,14 @@ class Classroom:
         self.grid_height = grid_height
         self.furniture: List[Furniture] = []
         
+    def furniture_distance(self, f1: Furniture, f2: Furniture) -> float:
+        """Euclidean distance between the centers of two furniture pieces"""
+        cx1 = f1.position[0] + f1.width / 2
+        cy1 = f1.position[1] + f1.height / 2
+        cx2 = f2.position[0] + f2.width / 2
+        cy2 = f2.position[1] + f2.height / 2
+        return ((cx2 - cx1) ** 2 + (cy2 - cy1) ** 2) ** 0.5
+
     def add_furniture(self, furniture: Furniture):
         """Add furniture to classroom"""
         self.furniture.append(furniture)
@@ -24,28 +32,36 @@ class Classroom:
         self.furniture.clear()
     
     def to_dict(self) -> dict:
-        """Convert classroom to dictionary for JSON serialization"""
+        furniture_data = []
+        
+        for f in self.furniture:
+            f_dict = {
+                "furniture_id": f.furniture_id,
+                "furniture_type": f.furniture_type.value,
+                "position": f.position,
+                "width": f.width,
+                "height": f.height,
+                "image_path": f.image_path,
+                "rotation": f.rotation
+            }
+            
+            # Save num_seats for tables
+            if hasattr(f, 'num_seats'):
+                f_dict["num_seats"] = f.num_seats
+            
+            furniture_data.append(f_dict)
+        
         return {
             "name": self.name,
             "grid_width": self.grid_width,
             "grid_height": self.grid_height,
-            "furniture": [
-                {
-                    "furniture_id": f.furniture_id,
-                    "furniture_type": f.furniture_type.value,
-                    "position": f.position,
-                    "width": f.width,
-                    "height": f.height,
-                    "image_path": f.image_path,
-                    "rotation": f.rotation
-                }
-                for f in self.furniture
-            ]
+            "furniture": furniture_data
         }
     
     @classmethod
     def from_dict(cls, data: dict) -> 'Classroom':
-        """Create classroom from dictionary"""
+        from .furniture import SingleDesk, Table, TeacherDesk  # Import subclasses
+        
         classroom = cls(
             name=data["name"],
             grid_width=data["grid_width"],
@@ -53,15 +69,47 @@ class Classroom:
         )
         
         for f_data in data["furniture"]:
-            furniture = Furniture(
-                furniture_id=f_data["furniture_id"],
-                furniture_type=FurnitureType(f_data["furniture_type"]),
-                position=tuple(f_data["position"]),
-                width=f_data["width"],
-                height=f_data["height"],
-                image_path=f_data.get("image_path"),
-                rotation=f_data.get("rotation", 0)
-            )
+            furniture_type = FurnitureType(f_data["furniture_type"])
+            
+            # Create the appropriate subclass based on type
+            if furniture_type == FurnitureType.SINGLE_DESK:
+                furniture = SingleDesk(
+                    furniture_id=f_data["furniture_id"],
+                    position=tuple(f_data["position"]),
+                    image_path=f_data.get("image_path"),
+                    rotation=f_data.get("rotation", 0)
+                )
+            elif furniture_type == FurnitureType.TABLE:
+                furniture = Table(
+                    furniture_id=f_data["furniture_id"],
+                    position=tuple(f_data["position"]),
+                    width=f_data["width"],
+                    height=f_data["height"],
+                    num_seats=f_data.get("num_seats", 4),  # Default to 4 if not specified
+                    image_path=f_data.get("image_path"),
+                    rotation=f_data.get("rotation", 0)
+                )
+            elif furniture_type == FurnitureType.TEACHER_DESK:
+                furniture = TeacherDesk(
+                    furniture_id=f_data["furniture_id"],
+                    position=tuple(f_data["position"]),
+                    width=f_data["width"],
+                    height=f_data["height"],
+                    image_path=f_data.get("image_path"),
+                    rotation=f_data.get("rotation", 0)
+                )
+            else:
+                # Fallback to generic Furniture for unknown types
+                furniture = Furniture(
+                    furniture_id=f_data["furniture_id"],
+                    furniture_type=furniture_type,
+                    position=tuple(f_data["position"]),
+                    width=f_data["width"],
+                    height=f_data["height"],
+                    image_path=f_data.get("image_path"),
+                    rotation=f_data.get("rotation", 0)
+                )
+            
             classroom.add_furniture(furniture)
         
         return classroom

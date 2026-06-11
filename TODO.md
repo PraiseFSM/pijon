@@ -1,164 +1,155 @@
 Classroom Seating App - Development Todo List
-Phase 1: Foundation & Core Data Models (Week 1-2)
-Project Setup
 
--Set up Python project structure
--Create virtual environment
--Install dependencies (PyQt6/Tkinter, pandas, etc.)
--Set up version control (Git)
+Legend: [x] done  [ ] not started  [~] partial / stub exists
+
+---
+
+Phase 1: Foundation & Core Data Models
+
+Project Setup
+[x] Set up Python project structure
+[x] Create virtual environment
+[x] Install dependencies (PyQt6)
+[x] Set up version control (Git)
 
 Core Data Models
-
--Create Student class (name, ID, metadata)
--Create Desk/Seat class (position, coordinates)
--Create Classroom class (grid system, furniture list)
-Implement distance calculation between seats
-Create constraint system (student proximity rules)  
+[x] Student class (name, ID, metadata, preferences)
+[x] Desk/Seat class (position, coordinates, distance calc)
+[x] Classroom class (grid system, furniture list)
+[x] Distance calculation between furniture pieces (furniture_distance)
+[x] Constraint/preference system (Preference model - avoid/prefer with weight)
+[x] Fixture nodes (teacher's desk, board etc. as locked graph nodes)
 
 Import/Export System
+[x] CSV student list import (simple: names only)
+[x] CSV student list import (full: names + preferences + fixtures, auto-detected)
+[x] CSV student list export (full format, preferences portable across sessions)
+[x] Save/load classroom layouts (JSON)
+[x] Save/load seating arrangements (JSON, keyed by furniture ID)
 
-CSV student list import
-Save/load classroom layouts (JSON)
-Save/load seating arrangements
+---
 
-Tech Stack
+Phase 2: Classroom Builder UI
 
-Python 3.10+
-pandas
-JSON
-dataclasses
-
-Phase 2: Classroom Builder UI (Week 3-4)
 Grid System
-
-Create adjustable grid canvas
-Implement zoom in/out for grid granularity
-Grid snapping functionality
-Visual grid lines and coordinates
+[x] Adjustable grid canvas
+[~] Zoom in/out (set_cell_size wired but no UI control yet)
+[x] Grid snapping
+[x] Visual grid lines
 
 Furniture Management
-
-Furniture palette (single desk, tables, chairs)
-Drag-and-drop furniture placement
-Rotate furniture pieces
-Delete/edit placed furniture
-Multi-seat furniture (tables with multiple chairs)
-Visual distinction between furniture types
+[x] Furniture palette (single desk)
+[x] Drag-and-drop furniture placement from palette
+[x] Drag existing furniture to reposition
+[x] Delete placed furniture (Delete key)
+[ ] Rotate furniture pieces
+[ ] Multi-seat furniture in palette (tables) - model exists, not in palette UI
+[ ] Import custom furniture image + size
 
 Classroom Management
+[x] Create / name classroom
+[x] Save classroom layout
+[x] Load existing classroom
+[x] Classroom selector (dropdown on load)
 
-Create new classroom
-Save classroom layout
-Load existing classroom
-Classroom selector/switcher
+---
 
-Tech Stack
+Phase 3: Seating Assignment Algorithm
 
-PyQt6 / Tkinter
-QGraphicsView
-Canvas widgets
-Event handlers
+Seat Graph
+[x] SeatGraph: proximity-linked node map (assignable seats + fixture nodes)
+[x] Configurable proximity threshold (set_proximity_threshold)
+[x] Fixture nodes connected to nearby seats for preference scoring
+[x] fixture_id_to_fid reverse map for algorithm lookups
+[x] Pre-population support (locked seats preserved across re-allocations)
 
-Design Note
+Assignment Algorithms
+[x] BogoAllocator - random baseline (shuffles both students and seats)
+[x] GreedyAllocator - cost-based, most-constrained-first
+    [x] Priority by sum of |weights|
+    [x] Marginal cost: own preferences + reverse preferences from placed students
+    [x] Fixture preference scoring via fixture_id_to_fid
+    [x] Random tie-breaking
+[ ] Iterative improvement (simulated annealing or genetic)
+    - swap two students, accept if cost improves (or with small probability if not)
+    - run for N iterations or until no improvement
 
-Consider using PyQt6's QGraphicsScene for drag-and-drop - handles mouse events and collision detection well
-Each furniture piece can be a QGraphicsItem
+Edge Cases
+[ ] Show unassigned students when more students than seats
+[ ] Warn when classroom has no assignable seats
 
-Phase 3: Seating Assignment Algorithm (Week 5)
-Assignment Algorithm
+---
 
-Random seating assignment (baseline)
-Constraint-aware assignment (avoid proximity violations)
-Calculate "cost" of arrangement based on constraints
-Iterative improvement algorithm (simulated annealing or genetic algorithm)
-Handle edge cases (more students than seats, etc.)
+Phase 4: Student Placement UI
 
-Distance Matrix
-
-Pre-calculate all seat-to-seat distances
-Efficient lookup for constraint checking
-Update distances when classroom layout changes
-
-Tech Stack
-
-NumPy
-scipy
-random
-optimization algorithms
-
-Algorithm Suggestion
-
-Start with greedy randomized approach, then implement constraint satisfaction
-For better results, consider simple genetic algorithm where each generation shuffles a few students and keeps arrangements that reduce constraint violations
-
-Phase 4: Student Placement UI (Week 6-7)
 Student Assignment View
+[x] Display classroom with student names on seats
+[x] Fixture nodes displayed with grey/neutral style
+[x] Shuffle button (re-runs selected algorithm)
+[x] Algorithm selection dialog (Greedy recommended, Bogo as baseline)
+[x] Manual drag-and-drop between desks (swap or move to empty)
+[ ] Visual loading indicator during allocation
+[ ] Show unassigned students panel
 
-Display classroom with student names on seats
-"Shuffle" button to generate new arrangement
-Visual loading indicator during shuffle
-Show unassigned students (if more students than seats)
-Manual drag-and-drop override for specific students
+Locking
+[x] Lock student to desk (right-click menu, amber highlight)
+[x] Unlock student (right-click menu)
+[x] Locked seats preserved across re-allocations
 
 Constraint Marker System
+[x] Marker mode (click two students to create preference)
+[x] Configurable weight field (negative = avoid, positive = prefer)
+[x] ESC to exit marker mode
+[ ] Visual lines between students with constraints on the grid
+[ ] Constraint violation highlighting (red tint when avoid-pairs are neighbors)
 
-Red marker mode: "Can't sit near each other"
-Click pairs of students to create constraints
-Visual indicators of existing constraints (lines, colors)
-Remove constraint functionality
-Optional: Green marker for "should sit together"
-Constraint violation highlighting in current arrangement
+Student List
+[x] Import students from CSV (auto-detects simple vs full format)
+[x] Export students to CSV (full format with preferences + fixtures)
+[x] Double-click student to edit name / manage preferences
+[x] Add / edit / remove preferences via dialog
+[x] Delete student
+[x] Fixture students filtered from allocation (not assigned to desks)
 
-Interaction Features
+Interaction
+[x] Save seating arrangement
+[x] Load seating arrangement (maps students by name, skips missing desks)
+[ ] Hover over seated student to see their preferences
+[ ] Undo/redo
 
-Hover to see student details
-Click student to see their constraints
-Undo/redo functionality
-Save arrangement to file
+---
 
-Tech Stack
+Phase 5: Polish & Testing
 
-PyQt6 Signals/Slots
-Custom widgets
-State management
-Event handling
-
-Phase 5: Polish & Testing (Week 8)
 UI Polish
-
-Consistent color scheme and styling
-Tooltips and help text
-Keyboard shortcuts
-Responsive layout
-Error messages and validation
+[ ] Consistent color scheme and styling
+[ ] Tooltips and help text
+[ ] Keyboard shortcuts
+[ ] Responsive layout
+[ ] Error messages and validation
 
 Testing
-
-Unit tests for core algorithms
-Integration tests for UI workflows
-Test with real classroom scenarios
-Edge case testing (empty classroom, 1 student, etc.)
-Performance testing with large classrooms
+[ ] Unit tests for GreedyAllocator cost function
+[ ] Unit tests for SeatGraph (neighbor detection, fixture resolution)
+[ ] Unit tests for CSV import/export round-trip
+[ ] Integration tests for UI workflows
+[ ] Edge case testing (empty classroom, 1 student, more students than seats)
 
 Documentation
+[ ] User guide / README
+[ ] Sample data files (classroom + student CSV with preferences)
 
-User guide / README
-Code documentation
-Sample data files
-
-Tech Stack
-
-pytest
-unittest
-Sphinx (docs)
+---
 
 Phase 6: Optional Enhancements (Future)
-Advanced Features
 
-Multiple constraint types (friendship groups, learning needs)
-Seating history (rotate students over time)
-Export to PDF/image for printing
-Templates for common classroom layouts
-Student photos on seats
-Multi-class support (switch between periods/classes)
-Statistics dashboard (constraint violation trends)
+[ ] Simulated annealing / genetic algorithm allocator
+[ ] Constraint violation score display (how good is the current arrangement)
+[ ] Seating history (rotate students over time)
+[ ] Export to PDF/image for printing
+[ ] Templates for common classroom layouts
+[ ] Multi-class support (switch between periods/classes)
+[ ] Statistics dashboard (constraint violation trends)
+[ ] Zoom in/out UI control
+[ ] Furniture rotation
+[ ] Table furniture in palette (multi-seat)

@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QScrollArea, QPushButton, QSplitter, QInputDialog,
                               QMessageBox, QFileDialog)
 from PyQt6.QtCore import Qt, QMimeData, QPoint, QRect
@@ -6,17 +6,9 @@ from PyQt6.QtGui import QPainter, QColor, QDrag, QPen, QBrush, QPixmap
 from typing import List, Optional, Tuple
 from pathlib import Path
 from src.models.classroom import Classroom
-
-
 from src.models.furniture import Furniture, SingleDesk, FurnitureType
+from src.ui import theme
 
-
-
-# Image paths
-#FURNITURE_IMAGE_DIR = Path("data/furniture_images")
-background_color = "#F5F5F5"
-default_furniture_color = "#4CAF50"
-grid_line_color = "#E0E0E0"
 default_image_path = "data/furniture_images/default_desk.png"
 
 
@@ -53,9 +45,8 @@ class FurniturePaletteItem(QWidget):
         """Draw the furniture on the pallette"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Background
-        painter.fillRect(self.rect(), QColor(background_color))
+
+        painter.fillRect(self.rect(), QColor(theme.PANEL_BG))
         
         palette_cell_size = 20
         margin = 10
@@ -83,10 +74,10 @@ class FurniturePaletteItem(QWidget):
             painter.drawPixmap(x_offset, y_offset, scaled_image)
         else:
             # Fallback: draw colored rectangle
-            painter.setBrush(QBrush(QColor(default_furniture_color)))
-            painter.setPen(QPen(QColor(default_furniture_color), 2))
+            painter.setBrush(QBrush(QColor(theme.FURNITURE_FALLBACK)))
+            painter.setPen(QPen(QColor(theme.FURNITURE_FALLBACK), 2))
             painter.drawRect(furniture_rect)
-        
+
         # Label
         painter.setPen(QPen(QColor("#000000")))
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, 
@@ -120,8 +111,8 @@ class FurniturePaletteItem(QWidget):
         else:
             # Fallback: draw colored rectangle
             rect = QRect(2, 2, pixmap_width - 4, pixmap_height - 4)
-            painter.setBrush(QBrush(QColor(default_furniture_color)))
-            painter.setPen(QPen(QColor(default_furniture_color), 2))
+            painter.setBrush(QBrush(QColor(theme.FURNITURE_FALLBACK)))
+            painter.setPen(QPen(QColor(theme.FURNITURE_FALLBACK), 2))
             painter.drawRect(rect)
         
         painter.end()
@@ -157,10 +148,14 @@ class FurniturePalette(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+        self.setStyleSheet(f"background-color: {theme.PANEL_BG};")
+
         # Title
         title = QLabel("Furniture Palette")
-        title.setStyleSheet("font-weight: bold; font-size: 14px; padding: 10px;")
+        title.setStyleSheet(
+            f"font-weight: bold; font-size: 14px; padding: 10px;"
+            f"color: {theme.PANEL_HEADER_COLOR};"
+        )
         layout.addWidget(title)
         
         # Scrollable area
@@ -242,12 +237,10 @@ class ClassroomGrid(QWidget):
         """Draw the grid and furniture"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Draw background
-        painter.fillRect(self.rect(), QColor(background_color))
-        
-        # Draw grid lines
-        painter.setPen(QPen(QColor(grid_line_color), 1))
+
+        painter.fillRect(self.rect(), QColor(theme.GRID_BG))
+
+        painter.setPen(QPen(QColor(theme.GRID_LINE), 1))
         
         # Vertical lines
         for x in range(self.grid_width + 1):
@@ -292,13 +285,12 @@ class ClassroomGrid(QWidget):
             painter.drawPixmap(x_offset, y_offset, scaled_image)
         else:
             # Fallback: draw colored rectangle
-            painter.setBrush(QBrush(QColor(default_furniture_color)))
-            painter.setPen(QPen(QColor(default_furniture_color), 2))
+            painter.setBrush(QBrush(QColor(theme.FURNITURE_FALLBACK)))
+            painter.setPen(QPen(QColor(theme.FURNITURE_FALLBACK), 2))
             painter.drawRect(furniture_rect)
-        
-      
+
         # Draw furniture ID
-        painter.setPen(QPen(QColor(background_color)))
+        painter.setPen(QPen(QColor(theme.GRID_BG)))
         painter.drawText(furniture_rect, Qt.AlignmentFlag.AlignCenter, furniture.furniture_id.split('_')[-1])
     
 
@@ -471,30 +463,54 @@ class ClassroomBuilderWidget(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Top toolbar
-        toolbar_layout = QHBoxLayout()
-        
+        layout.setSpacing(0)
+
+        toolbar_widget = QWidget()
+        toolbar_widget.setObjectName("toolbar")
+        toolbar_widget.setStyleSheet(f"""
+            QWidget#toolbar {{
+                background-color: {theme.TOOLBAR_BG};
+            }}
+            QPushButton {{
+                background-color: {theme.TOOLBAR_BTN_BG};
+                color: {theme.TOOLBAR_TEXT};
+                border: 1px solid {theme.TOOLBAR_BTN_BORDER};
+                border-radius: 4px;
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme.TOOLBAR_BTN_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {theme.TOOLBAR_BTN_PRESSED};
+            }}
+            QLabel {{
+                color: {theme.TOOLBAR_LABEL_COLOR};
+            }}
+        """)
+        toolbar_layout = QHBoxLayout(toolbar_widget)
+        toolbar_layout.setContentsMargins(6, 4, 6, 4)
+        toolbar_layout.setSpacing(6)
+
         save_btn = QPushButton("Save Classroom")
         save_btn.clicked.connect(self.save_classroom)
         toolbar_layout.addWidget(save_btn)
-        
+
         load_btn = QPushButton("Load Classroom")
         load_btn.clicked.connect(self.load_classroom)
         toolbar_layout.addWidget(load_btn)
-        
+
         clear_btn = QPushButton("Clear Classroom")
         clear_btn.clicked.connect(self.clear_classroom)
         toolbar_layout.addWidget(clear_btn)
-        
+
         toolbar_layout.addStretch()
-        
-        # Classroom name label
+
         self.name_label = QLabel("Unsaved Classroom")
-        self.name_label.setStyleSheet("font-weight: bold;")
+        self.name_label.setStyleSheet(f"font-weight: bold; color: {theme.TOOLBAR_TEXT};")
         toolbar_layout.addWidget(self.name_label)
-        
-        layout.addLayout(toolbar_layout)
+
+        layout.addWidget(toolbar_widget)
         
         # Splitter for resizable panels
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -514,7 +530,13 @@ class ClassroomBuilderWidget(QWidget):
     
     def save_classroom(self):
         """Save the current classroom layout"""
-        # Get classroom name
+        if not self.classroom_grid.furniture_list:
+            QMessageBox.warning(
+                self, "Empty Classroom",
+                "The classroom has no furniture. Add some desks before saving."
+            )
+            return
+
         if not self.current_classroom_name:
             name, ok = QInputDialog.getText(
                 self,
