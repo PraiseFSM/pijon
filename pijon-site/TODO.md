@@ -1,5 +1,42 @@
 # Pijon Web — TODO
 
+## Bugs & feature requests (human-found)
+
+### Bugs
+- **Right-click menu doesn't close on left-click (Student editor).** After opening the desk
+  right-click/context menu, a left-click anywhere on the grid should dismiss it. Currently only
+  another right-click closes it.
+- **Show Violations is stale.** Toggling Show Violations off, editing preferences, then turning it
+  back on does not reflect the updated preferences. Violations must recompute on relevant updates
+  (preferences/arrangement/nearness change) while the toggle is on — invalidate the cached SeatGraph
+  and repaint.
+
+### Furniture editor — adjustable grid
+- **Resize the grid: add/delete rows & columns** to make the classroom bigger or smaller.
+- **Adjustable grid granularity** (finer cell size) so furniture can be placed with more precision:
+  - changing grid granularity must NOT change the rendered size of furniture
+  - lets the teacher position furniture more granularly
+  - must integrate cleanly with **student nearness** — proximity threshold / SeatGraph distances
+    have to stay correct when cell granularity changes (re-derive thresholds in real units, not raw cells)
+  - goal: more customization of the classroom layout
+
+### Merge Student + Preference editors into one editor
+- Fold the Preference editor into the Student editor (one tool, not two).
+  - Clicking a student in the roster (left panel) shows that student's preferences.
+  - Move all preference controls to a **right-hand sidebar** (mirroring the roster on the left):
+    adjust weight, "show links" toggle, the per-student preference list.
+  - A **toggle at the top of the preferences sidebar** enables "preference assigner mode" (the
+    click-two-students marker mouse mode that the Preferences tab currently uses).
+- **Roster panel ordering:** "Import CSV" should be the **bottom-most** option in the roster menu.
+- **Add students manually:** a text box to add a student by name, placed **just above** the Import
+  CSV button.
+
+### Data model invariant
+- **Preferences must always be mutual.** Build it into the system so a preference between A and B is
+  always symmetric: whenever a preference is created/updated/removed, the counterpart on the other
+  student is kept in sync automatically (single source of truth or enforced two-way write). The
+  allocator already treats prefs bidirectionally, but the stored data itself must stay mutual.
+
 ## Deferred tests (write later)
 
 Tests were paused to conserve usage. Code below was shipped WITHOUT tests and needs an
