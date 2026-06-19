@@ -158,7 +158,6 @@ Phase 6: Optional Enhancements (Future)
 Human found bugs:
 after entering the right click menu in students mode, left clicking anywhere on the grid should close the menu, it does not - only right clicking closes the menu
 
-the student editor and preference editor should be merged
 
 furniture editor features:
     make the grid bigger or smaller (add&delete rows&columns)
@@ -168,7 +167,14 @@ furniture editor features:
         careful during implementation to integrate well with student nearness
         goal is to allow more customization of classroom
 
-add students manually
+Student editor changes:
+    the student editor and preference editor should be merged:
+        clicking on students in the roster should show their preferences
+        all of the options in the preferences menu should be on the right of the grid, like how the roster is on the left of the grid (adjusting weight, show links)
+        there should be a toggle at the top of the preferences sidebar to turn on preference assigner mode (the mouse mode you are in when in the preferences tab currently)
+    Import CSV should be the bottom most option in the roster menu
+    add students manually, there should be a text box to add students just above the import csv button
+
 
 show violations should refresh on updates, right now if i update preferences and go back to show violtions, it doesnt show them 
 
