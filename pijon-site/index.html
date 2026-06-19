@@ -2,9 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="data:," />
+    <!-- Viewport — required for standalone PWA display on mobile/Chromebook -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pijon</title>
+    <meta
+      name="description"
+      content="Local-first classroom seating tool — build your layout, seat your students, nothing leaves your device."
+    />
+    <!-- Theme color used by Chrome/Edge/Safari for the browser chrome and PWA title bar -->
+    <meta name="theme-color" content="#4f46e5" />
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Apple PWA: icon + standalone behaviour on iOS/iPadOS -->
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pijon" />
+    <!-- vite-plugin-pwa injects the <link rel="manifest"> automatically at build time -->
   </head>
   <body>
     <div id="root"></div>
