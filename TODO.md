@@ -153,3 +153,24 @@ Phase 6: Optional Enhancements (Future)
 [ ] Zoom in/out UI control
 [ ] Furniture rotation
 [ ] Table furniture in palette (multi-seat)
+
+
+Human found bugs:
+after entering the right click menu in students mode, left clicking anywhere on the grid should close the menu, it does not - only right clicking closes the menu
+
+the student editor and preference editor should be merged
+
+furniture editor features:
+    make the grid bigger or smaller (add&delete rows&columns)
+    adjustable grid size:
+        does not change size of furniture
+        lets you set furniture with more granularity
+        careful during implementation to integrate well with student nearness
+        goal is to allow more customization of classroom
+
+add students manually
+
+show violations should refresh on updates, right now if i update preferences and go back to show violtions, it doesnt show them 
+
+student preferences should always be mutual, build it in to the system such that this is always maintained, every time a preference is updated, that syncs between students
+
