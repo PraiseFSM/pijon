@@ -284,8 +284,17 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
   }, [buildEventCtx]);
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-  }, []);
+    e.preventDefault(); // allow drop
+    const ctx = buildEventCtx();
+    if (ctx === null) return;
+    editorRef.current.onDragOver?.(e.nativeEvent, ctx);
+  }, [buildEventCtx]);
+
+  const handleDragEnd = useCallback((e: React.DragEvent<HTMLCanvasElement>) => {
+    const ctx = buildEventCtx();
+    if (ctx === null) return;
+    editorRef.current.onDragEnd?.(e.nativeEvent, ctx);
+  }, [buildEventCtx]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const ctx = buildEventCtx();
@@ -319,6 +328,7 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
       onKeyDown={handleKeyDown}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
       onContextMenu={handleContextMenu}
       aria-label="Classroom grid"
       role="img"

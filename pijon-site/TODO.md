@@ -2,6 +2,13 @@
 
 ## Bugs & feature requests (human-found)
 
+> **Planned:** technical approach, files, and execution order are in
+> [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) §12 (Iteration 2). Mapping:
+> right-click menu → §12.1 · show-violations refresh → §12.2 · adjustable grid → §12.3 ·
+> merge Student+Preference editors / manual add / CSV-at-bottom → §12.4 · mutual preferences → §12.5.
+> Suggested order: 12.1 → 12.5 → 12.2 → 12.4 → 12.3. Core items (12.3, 12.5, 12.2-core) get tests +
+> hole-poke review; UI items (12.1, 12.4) follow the build pattern.
+
 ### Bugs
 - **Right-click menu doesn't close on left-click (Student editor).** After opening the desk
   right-click/context menu, a left-click anywhere on the grid should dismiss it. Currently only
@@ -36,6 +43,24 @@
   always symmetric: whenever a preference is created/updated/removed, the counterpart on the other
   student is kept in sync automatically (single source of truth or enforced two-way write). The
   allocator already treats prefs bidirectionally, but the stored data itself must stay mutual.
+
+### Iteration 3 — round-2 feedback (→ IMPLEMENTATION_PLAN §13)
+
+- **§13.1 Bug — furniture drag should show the furniture moving live, not a drag-image.** Dragging
+  furniture (palette place + move) should render the actual furniture at its live position instantly,
+  not the browser's ghost drag-image of the furniture PNG.
+- **§13.2 Feature — one action button with a dropdown.** Collapse Greedy / Allocate / Smart Shuffle
+  into a single split-button: primary action runs the shuffle; the dropdown picks algorithm
+  (Greedy / Random) and the allocate-vs-shuffle variant.
+- **§13.3 Feature — Settings menu.** Add a settings popover/menu; move low-frequency controls into it.
+- **§13.4 Feature — nearness control lives in Settings** (moved out of the main toolbar, into §13.3).
+- **§13.5 Feature — Show Violations on by default; its off-switch lives in Settings** (§13.3).
+- **§13.6 Bug/UX — preference-assigner first-click needs clear feedback.** When you click the first
+  student in assigner mode, give obvious visual feedback (strong highlight + hint) that it's selected.
+- **§13.7 Feature — drag a student from the roster onto a desk** to seat them (swap if occupied).
+- **§13.8 Feature — surface an error on invalid seating.** When seating is invalid (e.g. more
+  students than seats / allocation can't place everyone / a manual action leaves an invalid state),
+  show a clear error rather than failing silently. (Define "invalid" precisely during design.)
 
 ## Deferred tests (write later)
 
@@ -281,9 +306,9 @@ list as more untested code lands.
 ### Phase 9 — Shell
 
 - `src/ui/editors/registry.ts`
-  - EDITOR_REGISTRY contains exactly [FurnitureEditor, StudentEditor] in order
+  - EDITOR_REGISTRY contains exactly [FurnitureEditor, StudentEditor] in order ✓ (§12.4 confirmed)
   - First entry is the default active editor on startup
-  - Adding PreferenceEditor in Phase 10 is a one-line change
+  - PreferenceEditor was merged into StudentEditor in §12.4 — no longer a separate registry entry
 
 - `src/ui/shell/EditorSwitcher.tsx`
   - Renders one tab button per EDITOR_REGISTRY entry
@@ -342,66 +367,57 @@ list as more untested code lands.
   - Confirm store resets to empty state (no furniture, empty roster, empty locks)
   - Confirm UI reflects cleared state immediately after erase
 
-### Phase 10 — PreferenceEditor
+### Phase 10 — PreferenceEditor (MERGED into StudentEditor in §12.4)
 
-- `src/state/store.ts` (surgical addition — addPreference / removePreference)
-  - `addPreference(studentId, pref)`: index-find, guard undefined, delegates to `studentAddPreference` (pure), replaces roster entry, marks dirty
-  - `removePreference(studentId, targetId)`: same pattern, delegates to `removePreferencesFor` (pure), marks dirty
-  - Both are immutable: they produce a new roster array without mutating existing Student records
-  - Autosave picks them up automatically (saveStatus='dirty' triggers the existing debounced IndexedDB write)
-  - Edge cases: studentId not in roster → no-op (findIndex returns -1); roster[idx] undefined guard
+> `PreferenceEditor.tsx` was deleted in §12.4. All functionality has been merged into StudentEditor.
+> Tests are in `src/test/studentEditorMerged.test.tsx`. The test obligations below are COMPLETED
+> in their merged form; items that were PreferenceEditor-specific now live in StudentEditor's right panel.
 
-- `src/ui/editors/PreferenceEditor.tsx`
+- `src/state/store.ts` (§12.4 additions, tested in studentEditorMerged.test.tsx)
+  - `addStudent(name)`: mints StudentId via crypto.randomUUID(), appends to roster, marks dirty, syncs classroom ✓
+  - `removeStudent(studentId)`: removes from roster, pruneOrphanStudentPrefs, syncRosterToClassroom (seat vacate), clears selectedStudentId ✓
+  - `setSelectedStudentId(id)`: UI state only, no dirty marking ✓
+  - `addPreference(studentId, pref)` / `removePreference(studentId, targetId)`: index-find, guard undefined, delegates to pure helpers, marks dirty ✓
+  - `setMutualPreference` / `clearMutualPreference`: delegate to domain/preference.ts mutual helpers ✓
 
-  **Marker mode (onPointerDown — port of SeatingGrid._handle_marker_click)**
-  - First click on occupied non-fixture desk: sets markerFirstFid + markerFirstStudent (module-level)
-  - Second click on different occupied desk: calls store.addPreference(student1.id, pref) using currentWeight; resets selection
-  - Self-target (same desk twice): gentle no-op — selection stays; no preference created
-  - Click on empty cell, fixture, or non-furniture: no action (all guards in findOccupiedFurnitureAt + occupant checks)
-  - currentWeight module-level var is kept in sync with the toolbar weight input via useEffect
+- `src/ui/editors/StudentEditor.tsx` (§12.4 merged editor, tested in studentEditorMerged.test.tsx)
 
-  **onKeyDown — ESC cancels**
-  - ESC with an in-progress selection: clears markerFirstFid / markerFirstStudent, requests repaint
-  - ESC with no selection: no-op (early return)
+  **Left SidePanel (roster)**
+  - Manual add-student form (text input + Add button; Enter key; blank = no-op) — placed just above Import CSV ✓
+  - Student list: click row → setSelectedStudentId; × button → removeStudent ✓
+  - Import CSV is the bottom-most control in the panel ✓
+  - Preference count badge per student ✓
 
-  **Toolbar (PreferenceToolbar)**
-  - Weight numeric input (default −1.0; step 0.5); updates both React state and module-level `currentWeight`
-  - Inline "Avoid / Prefer / Neutral" color label derived from weight sign
-  - "Show Links" toggle: sets module-level `showLinks`; requests repaint
-  - Hint label always visible: "Click a student, then another to link them. ESC to cancel."
+  **Right RightPanel (preferences for selected student)**
+  - Assigner toggle at the TOP of the panel (orange when ON; resets on deactivate) ✓
+  - Weight input + Avoid/Prefer/Neutral label ✓
+  - Show Links toggle: draws green/red dashed lines between seated students ✓
+  - Pref list for selected student: direction label, target name, weight, ✕ remove button ✓
+  - Remove: student-kind → clearMutualPreference; furniture-kind → removePreference; location → not removable ✓
+  - Add-pref form: target dropdown (excludes self) + Add button → setMutualPreference ✓
+  - Placeholder when no student selected ✓
 
-  **SidePanel (PreferenceSidePanel)**
-  - Lists all real (non-fixture) roster students with preference count badge
-  - Click a student row to expand their preferences; click again to collapse
-  - Expanded view: each preference shows direction (Avoid/Prefer), target name, weight with ✕ remove button
-  - Remove button calls store.removePreference(studentId, targetId) then requests repaint
-  - Location-kind preferences shown (read-only; no remove button since removePreference operates on targetId)
-  - Inline "Add preference" form: target dropdown (excludes self) + weight input + Add button
-  - Add form calls preferStudent/avoidStudent then store.addPreference; guards self-target and empty target
-  - Dropdown filters out the selected student (no self-target)
+  **Assigner (marker) mode canvas behavior**
+  - When ON: onPointerDown step 1 → markerFirstFid; step 2 → setMutualPreference(s1, s2, weight) ✓
+  - Self-target: no-op (markerFirstFid kept) ✓
+  - ESC: clears selection ✓
+  - When OFF: drag-between-desks behavior unchanged ✓
 
-  **paintOverlay**
-  - save()/restore() wraps all drawing; canvas NOT cleared
-  - Marker first-selection: amber ring (strokeStyle rgba(230,120,0,0.95), lineWidth 3) + light amber fill around the first-selected desk
-  - Show Links (when showLinks=true): dashed lines between currently-seated students who share a student-kind preference
-    - Green (rgba(46,125,50,0.55)) for prefer (weight > 0)
-    - Red (rgba(183,28,28,0.55)) for avoid (weight < 0)
-    - Small arrowhead at target end of each link
-    - Only draws for currently-seated students (sidToFid reverse map built each frame)
-  - Uses usePijonStore.getState() to read classroom (same pattern as StudentEditor)
+  **paintOverlay additions (from PreferenceEditor)**
+  - Preference links (showLinks=true): green=prefer, red=avoid, dashed, arrowhead at target ✓
+  - Amber ring around first-selected desk in assigner mode ✓
 
-  **activate / deactivate**
-  - activate: clears markerFirstFid, markerFirstStudent; showLinks and currentWeight persist within session
-  - deactivate: clears markerFirstFid, markerFirstStudent (no artifacts on tool-switch)
+  **Registry**
+  - `src/ui/editors/registry.ts`: [FurnitureEditor, StudentEditor] — PreferenceEditor removed ✓
 
-  **Registry change (the ONLY shell change)**
-  - `src/ui/editors/registry.ts`: added `import { PreferenceEditor }` + appended to EDITOR_REGISTRY
-  - No TopBar, SidePanel, EditorSwitcher, App.tsx, or ClassroomCanvas changes needed
+  **Shell additions (§12.4)**
+  - `src/ui/editors/EditorMode.ts`: optional `RightPanel?: React.FC<{ctx}>` added ✓
+  - `src/ui/shell/RightPanel.tsx`: new shell component mirroring SidePanel ✓
+  - `src/ui/App.tsx`: renders RightPanel to the right of the canvas when editor has one ✓
 
   **Phase 11 notes**
   - PWA manifest and Workbox service-worker (vite-plugin-pwa) still needed for offline / installable use
   - All runtime code is already network-free (ESLint no-network enforced); PWA layer adds only caching/install metadata
-  - Recommended: add a "saved locally" indicator animation (pulse on saveStatus='saving') to reinforce the local-first promise before shipping
 
 ### Phase 11 — PWA + deploy
 

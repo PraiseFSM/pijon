@@ -290,3 +290,151 @@ Each phase is a dispatchable unit; phases 1–2 are independently testable with 
   5. Save to a `.pijon` file, clear, re-open the file → identical state.
   6. Go offline → app still loads and works (PWA).
 - Confirm **zero** outbound network requests at runtime (DevTools Network tab).
+
+---
+
+## 12. Iteration 2 — human-found bugs & feature requests
+
+> Derived from the "Bugs & feature requests" section of `TODO.md`. Items that touch the
+> domain/algorithm core (**12.3 granularity**, **12.5 mutual prefs**, and the core part of **12.2**)
+> MUST get a full Vitest suite + an adversarial hole-poke pass — they can silently break the
+> allocator. UI-only items (**12.1**, **12.4**) can follow the plain build pattern. Update
+> `PROJECT_OUTLINE.md` in lockstep where product behavior changes (already done for 12.4/12.5).
+
+### 12.1 Bug — context menu doesn't close on left-click (Student editor)
+- **Cause:** the desk context menu (floating React menu in `StudentSidePanelWithMenu`, shown via the
+  module-level `showContextMenuCallback`) only closes on another right-click.
+- **Fix:** dismiss on any pointer-down outside the menu. Add a module-level `closeContextMenuCallback`
+  (registered like `showContextMenuCallback`); call it from `StudentEditor.onPointerDown`, and while
+  the menu is mounted attach a capture-phase `window` `pointerdown` listener that closes it unless the
+  target is inside the menu element. Clear in `deactivate`.
+- **Files:** `src/ui/editors/StudentEditor.tsx`. UI-only. If 12.4 lands first, implement here as part
+  of the merged editor.
+
+### 12.2 Bug — "Show Violations" is stale after preference edits
+- **Cause:** violation rendering caches the SeatGraph by `classroom` reference + threshold and reads
+  each seated student's prefs from the **occupant copy** on the furniture. `store.addPreference` makes
+  a new `Student` in `roster` but doesn't update the occupant copy, and the cache key (classroom)
+  doesn't change — so edits are never seen.
+- **Fix:** make `roster` the source of truth for prefs and resolve seated students' prefs from
+  `roster` by id at compute time; invalidate the violation/SeatGraph cache when `roster` changes too.
+  The 12.5 change (occupants reference roster by id) makes this fall out for free.
+- **Files:** `src/ui/editors/StudentEditor.tsx` (cache key + lookup), maybe `src/state/store.ts`.
+  Add tests for the violation predicate against a live, edited roster.
+
+### 12.3 Feature — adjustable grid (Furniture editor) — CORE, needs tests
+- **(a) Resize (add/delete rows & columns):** domain `resizeGrid(classroom, edge, delta)` →
+  new Classroom with `gridW/gridH` changed; adding at `top`/`left` offsets all furniture by the delta;
+  deleting **blocks with a warning** if the row/col to remove is occupied (safer than clamping/dropping).
+  Store `resizeGrid` action (immutable, marks dirty); Furniture toolbar gets +/- per edge.
+- **(b) Finer granularity without resizing furniture:** add `cellsPerUnit` (granularity `G`) to
+  Classroom. Furniture pos/size are stored in **fine cells**; raising `G` scales existing furniture by
+  `G` so physical size is unchanged; new placement snaps at fine-cell resolution.
+  - **Nearness must stay correct:** define the proximity threshold in **real units** and convert when
+    building the SeatGraph: `thresholdCells = thresholdUnits * G`. `furniture_distance` stays in cell
+    space. This keeps neighbor relationships stable as granularity changes — the trap to avoid.
+- **Files:** `src/domain/classroom.ts`, `seatGraph.ts`, `io/projectFile.ts` (**schema v2 + migration**,
+  bump `version`), `src/ui/editors/FurnitureEditor.tsx`, canvas (`cellSize` becomes px-per-fine-cell;
+  `hitTest`/render already work in cells). Full tests + review.
+
+### 12.4 Feature — merge Student + Preference editors into one
+- Registry becomes `[FurnitureEditor, StudentEditor]`; **PreferenceEditor absorbed** (move marker mode
+  + preference-link overlay into StudentEditor, delete the file).
+- **EditorMode interface:** add optional `RightPanel?: React.FC<{ ctx: EditorContext }>`; the shell
+  renders it to the right of the canvas when present (mirror the left `SidePanel`). Surgical interface
+  + `App.tsx`/`shell` change.
+- **StudentEditor:**
+  - *Left roster panel:* a manual **add-student text box + Add button**, the student list (click →
+    selects, sets `store.selectedStudentId`), and **Import CSV as the bottom-most control**.
+  - *Right preferences panel:* the selected student's preferences (add/remove + weight), a **"show
+    links" toggle**, and a **top toggle to enable preference-assigner (marker) mode**.
+  - *Canvas:* marker mode (gated by the toggle) + link overlay, moved from PreferenceEditor.
+- **Store:** add `selectedStudentId` (UI state) so both panels stay in sync.
+- **Files:** `StudentEditor.tsx`, remove `PreferenceEditor.tsx`, `registry.ts`, `EditorMode.ts`,
+  `App.tsx`/`shell/*`, `store.ts`. UI-heavy; marker/store bits get light tests.
+
+### 12.5 Invariant — preferences are always mutual — CORE, needs tests
+- **Enforce symmetry at write time:** `addPreference(A, →B)` also writes `B→A` (same weight,
+  student-kind); `removePreference` removes both; weight edits update both. Provide
+  `setMutualPreference(a, b, weight)` / `clearMutualPreference(a, b)` and route all UI through them.
+- **Single source of truth:** switch runtime occupants for **real students** to reference `roster` by
+  **studentId** (fixtures keep their embedded faux student — they're geometry). `selectArrangement`
+  resolves `fid → studentId → roster Student`. This matches the on-disk format (arrangement is already
+  `fid → studentId`) and removes the duplicated student copies behind 12.2.
+- **Files:** `src/domain/furniture.ts`/`classroom.ts`, `src/state/store.ts`,
+  `io/projectFile.ts` (likely already compatible), editor read paths. Full tests + adversarial review.
+
+### Suggested execution order
+1. **12.1** (tiny UI bug).
+2. **12.5** (core: mutual prefs + roster-as-source-of-truth) — unblocks 12.2.
+3. **12.2** (violations refresh) — largely falls out of 12.5.
+4. **12.4** (merge editors).
+5. **12.3** (adjustable grid) — largest core change; do last.
+
+Core work (12.3, 12.5, and 12.2's core part): tests + hole-poke review. UI work (12.1, 12.4): build pattern.
+
+---
+
+## 13. Iteration 3 — round-2 feedback
+
+> From `TODO.md` "Iteration 3". Mostly UI/UX (build pattern); 13.8 (invalid-seating) touches the
+> store/validation and gets tests. Keep the suite green; no network (ESLint hard error). Update the
+> outline if product behavior shifts (settings menu, violations-on-by-default, drag-from-roster).
+
+### 13.1 Bug — furniture drags live, not as a ghost image
+- Furniture should appear to **move in real time** on the grid while dragging, instead of showing the
+  browser's default HTML5 drag-image (the furniture PNG ghost).
+- For **moving existing furniture** (FurnitureEditor pointer-drag): already pointer-based; ensure the
+  `paintOverlay` renders the furniture itself at the live position each move (not just an outline), and
+  optionally dim the original. For **palette → grid placement** (HTML5 drag): suppress the default drag
+  image (`e.dataTransfer.setDragImage` to a transparent 1px, or switch the palette to a pointer-drag
+  that paints a live preview onto the canvas). Pick the approach that gives instant live furniture.
+- Files: `src/ui/editors/FurnitureEditor.tsx`, maybe `src/ui/canvas/render.ts`. UI-only.
+
+### 13.2 Feature — single action split-button (algorithm dropdown)
+- Replace the separate Allocate / Smart Shuffle / algorithm `<select>` with one **split-button**:
+  primary click runs the shuffle with the chosen allocator; a dropdown chooses algorithm
+  (Greedy default / Random) and the allocate-vs-shuffle variant. Drive the algorithm list from the
+  existing allocator set (no hardcoding beyond what's there). Files: `src/ui/editors/StudentEditor.tsx`.
+
+### 13.3 Feature — Settings menu
+- Add a lightweight **settings popover** (gear button) in the Students toolbar (or app shell). Houses
+  low-frequency controls. New small component, e.g. `src/ui/shell/SettingsMenu.tsx` or editor-local.
+- Settings state that must persist (e.g. violations-on, nearness) should live in the store and be
+  serialized as UI/project settings; transient menu open/close is local.
+
+### 13.4 Feature — nearness in Settings
+- Move the Nearness (units) control out of the main toolbar into the §13.3 settings menu. Keep it in
+  **units** (post-12.3). Files: `src/ui/editors/StudentEditor.tsx`, settings menu.
+
+### 13.5 Feature — violations ON by default, off-switch in Settings
+- Default Show-Violations to **on**. Move its toggle into the §13.3 settings menu. Persist the flag in
+  the store (so it survives reloads). Ensure the existing live-refresh (12.2) still holds. Files:
+  `src/ui/editors/StudentEditor.tsx`, store (a `showViolations` setting), settings menu.
+
+### 13.6 Bug/UX — assigner first-click feedback
+- In preference-assigner mode, selecting the first student must give **obvious** feedback: a strong
+  highlight ring on the desk (already partial — make it unmistakable) plus a toolbar/hint cue naming
+  the selected student ("Linking <name>… click another, ESC to cancel"). Files: `StudentEditor.tsx`
+  (`paintOverlay` + the right-panel/toolbar hint).
+
+### 13.7 Feature — drag a student from the roster onto a desk
+- Make roster list items draggable (HTML5 drag, set a `studentId` payload). The canvas `onDrop` (in
+  StudentEditor) maps the drop cell → furniture and **seats that student** (swap if the desk is
+  occupied, move if the student was already seated elsewhere) via the store. Suppress/clean the drag
+  image per 13.1's approach. Files: `StudentEditor.tsx` (roster panel + canvas onDrop), store
+  (reuse `manualReassign`/assignment actions; may need an `assignStudentToFurniture(sid, fid)` action).
+
+### 13.8 Feature — surface an error on invalid seating
+- Define "invalid" precisely: at minimum (a) **more students than assignable seats** (allocate/shuffle
+  can't place everyone) and (b) any allocation that leaves students unplaced. Surface a clear,
+  non-crashing **error/warning banner** (e.g. "3 students couldn't be seated — 28 seats for 31
+  students"). Consider a `validateSeating(classroom, roster)` pure helper returning structured issues,
+  shown by the editor. Don't block the workflow — inform. Files: `src/domain/` (a `validateSeating`
+  helper + tests), `src/state/store.ts` (expose issues), `StudentEditor.tsx` (banner). Add tests for
+  the validation helper.
+
+### Suggested order
+13.3 (settings shell) → 13.4 + 13.5 (move controls in, violations-on) → 13.2 (split-button) →
+13.6 (assigner feedback) → 13.1 (live furniture drag) → 13.7 (drag from roster) → 13.8 (validation).
+13.8 gets tests; the rest follow the build pattern with a light review.

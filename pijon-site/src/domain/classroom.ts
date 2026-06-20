@@ -32,19 +32,40 @@ export interface Classroom {
   readonly gridW: number;
   readonly gridH: number;
   readonly furniture: readonly Furniture[];
+  /**
+   * Grid granularity: how many fine cells equal one "unit".
+   * Default 1 = existing behaviour (one cell = one unit).
+   * At G > 1 the grid has more cells but furniture physical size is unchanged —
+   * positions/sizes are all in fine cells; divide by G to get units.
+   */
+  readonly cellsPerUnit: number;
+  /**
+   * Proximity threshold in UNITS (not raw cells).
+   * Default 1.5 units = today's behaviour (orthogonal + diagonal neighbours at G=1).
+   * SeatGraph converts this to cells: thresholdCells = thresholdUnits * cellsPerUnit.
+   * Storing in units means the threshold is stable when granularity changes.
+   */
+  readonly thresholdUnits: number;
 }
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
+/** Default proximity threshold in units (covers orthogonal + diagonal neighbours). */
+export const DEFAULT_THRESHOLD_UNITS = 1.5;
+/** Default granularity: 1 fine cell = 1 unit (preserves all existing behaviour). */
+export const DEFAULT_CELLS_PER_UNIT = 1;
+
 export function makeClassroom(
   id: string,
   name: string,
   gridW: number,
   gridH: number,
+  cellsPerUnit: number = DEFAULT_CELLS_PER_UNIT,
+  thresholdUnits: number = DEFAULT_THRESHOLD_UNITS,
 ): Classroom {
-  return { id, name, gridW, gridH, furniture: [] };
+  return { id, name, gridW, gridH, furniture: [], cellsPerUnit, thresholdUnits };
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +142,275 @@ export function moveFurniture(c: Classroom, id: FurnitureId, pos: Vec2): Classro
     // Spread occupants on the moved piece so the result shares no mutable array
     // reference with the original (same defense as moveTo in furniture.ts).
     furniture: c.furniture.map((f) => (f.id === id ? { ...f, pos, occupants: [...f.occupants] } : f)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// resizeGrid — add/remove rows or columns at a given edge
+// ---------------------------------------------------------------------------
+
+/** The four edges at which a row/column can be added or removed. */
+export type GridEdge = 'top' | 'bottom' | 'left' | 'right';
+
+/**
+ * Result type: success carries the new Classroom; failure carries a reason.
+ *
+ * The discriminated union keeps this pure — callers pattern-match on `ok` and
+ * the store surfaces the `reason` as a warning toast, never throws.
+ */
+export type ResizeGridResult =
+  | { readonly ok: true; readonly classroom: Classroom }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Add or remove rows/columns at the given edge, returning a new Classroom.
+ *
+ * delta > 0: add |delta| rows/columns at that edge.
+ * delta < 0: remove |delta| rows/columns from that edge.
+ * delta = 0: no-op (returns the same classroom reference).
+ *
+ * Adding at 'top'/'left' shifts ALL furniture positions by +delta so that the
+ * physical layout stays put relative to content (i.e. new empty space appears
+ * at the edge, existing furniture moves into the enlarged grid).
+ *
+ * Adding at 'bottom'/'right' just increases gridW/gridH; furniture is unchanged.
+ *
+ * Removing is blocked (returns { ok: false }) if any furniture piece would
+ * occupy a row/column being removed or would fall outside the new bounds after
+ * the shift. The caller must surface this as a warning.
+ *
+ * Minimum grid size is 1×1 — removal that would reduce a dimension below 1 is
+ * also blocked.
+ */
+export function resizeGrid(
+  c: Classroom,
+  edge: GridEdge,
+  delta: number,
+): ResizeGridResult {
+  // Guard: delta must be a finite integer (non-integer or NaN bypasses all range guards).
+  if (!Number.isFinite(delta) || !Number.isInteger(delta)) {
+    return { ok: false, reason: `resizeGrid delta must be a finite integer, got ${String(delta)}.` };
+  }
+  if (delta === 0) return { ok: true, classroom: c };
+
+  // ---- Determine new grid dimensions and shift amounts -----
+  let newGridW = c.gridW;
+  let newGridH = c.gridH;
+  let shiftX = 0;
+  let shiftY = 0;
+
+  switch (edge) {
+    case 'top':
+      newGridH = c.gridH + delta;
+      shiftY = delta; // positive delta → furniture moves down
+      break;
+    case 'bottom':
+      newGridH = c.gridH + delta;
+      // No shift — rows added/removed at the far end
+      break;
+    case 'left':
+      newGridW = c.gridW + delta;
+      shiftX = delta; // positive delta → furniture moves right
+      break;
+    case 'right':
+      newGridW = c.gridW + delta;
+      // No shift
+      break;
+  }
+
+  // ---- Guard: minimum 1×1 -----
+  if (newGridW < 1) {
+    return { ok: false, reason: `Cannot remove: grid would be too narrow (${newGridW.toString()} columns). Minimum is 1.` };
+  }
+  if (newGridH < 1) {
+    return { ok: false, reason: `Cannot remove: grid would be too short (${newGridH.toString()} rows). Minimum is 1.` };
+  }
+
+  // ---- Compute shifted furniture positions -----
+  // We compute the new positions first so we can check bounds before committing.
+  const shifted = c.furniture.map((f) => ({
+    f,
+    newPos: { x: f.pos.x + shiftX, y: f.pos.y + shiftY },
+  }));
+
+  // ---- Guard: furniture must fit in the new grid -----
+  for (const { f, newPos } of shifted) {
+    if (
+      newPos.x < 0 ||
+      newPos.y < 0 ||
+      newPos.x + f.w > newGridW ||
+      newPos.y + f.h > newGridH
+    ) {
+      // Determine a human-readable description of what's out of bounds.
+      // If the furniture was shifted by delta < 0 (removal at top/left), it means
+      // that furniture occupies the rows/cols being removed.
+      let edgeDesc: string;
+      if (delta < 0 && (edge === 'top' || edge === 'left')) {
+        edgeDesc = `"${f.kind}" at (${f.pos.x.toString()},${f.pos.y.toString()}) occupies the ${edge === 'top' ? 'row(s)' : 'column(s)'} being removed`;
+      } else {
+        edgeDesc = `"${f.kind}" at (${f.pos.x.toString()},${f.pos.y.toString()}) would fall outside the new grid bounds`;
+      }
+      return {
+        ok: false,
+        reason: `Cannot resize: ${edgeDesc}. Move or remove it first.`,
+      };
+    }
+  }
+
+  // ---- Commit: apply shifted positions -----
+  const newFurniture = shifted.map(({ f, newPos }) =>
+    newPos.x === f.pos.x && newPos.y === f.pos.y
+      ? f
+      : { ...f, pos: newPos, occupants: [...f.occupants] },
+  );
+
+  return {
+    ok: true,
+    classroom: { ...c, gridW: newGridW, gridH: newGridH, furniture: newFurniture },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// setGranularity — change cellsPerUnit, scaling all furniture + grid
+// ---------------------------------------------------------------------------
+
+/**
+ * Change the grid granularity from the classroom's current cellsPerUnit to
+ * `newG`, scaling all furniture positions, sizes, and the grid dimensions so
+ * that the physical layout is unchanged.
+ *
+ * Scale factor: each value is multiplied by (newG / oldG).
+ *
+ * Constraints:
+ *  - newG must be a positive integer ≥ 1.
+ *  - All resulting values must be positive integers (if oldG does not divide
+ *    evenly into the scaled values, the operation is rejected to avoid
+ *    fractional cell positions).
+ *
+ * Returns a new Classroom (or throws TypeError for invalid newG).
+ * The proximity threshold (thresholdUnits) is NOT changed — it stays in units
+ * so neighbour relationships remain identical.
+ */
+export function setGranularity(c: Classroom, newG: number): Classroom {
+  if (!Number.isInteger(newG) || newG < 1) {
+    throw new TypeError(`cellsPerUnit must be a positive integer ≥ 1, got ${newG.toString()}`);
+  }
+
+  const oldG = c.cellsPerUnit;
+  if (newG === oldG) return c;
+
+  // Scale factor as a rational number (newG / oldG).
+  // We check divisibility explicitly to avoid silent fractional truncation.
+  const numerator = newG;
+  const denominator = oldG;
+
+  function scale(v: number): number {
+    const result = (v * numerator) / denominator;
+    // Must be a positive integer — reject if not exactly representable.
+    if (!Number.isInteger(result)) {
+      throw new RangeError(
+        `Cannot change granularity from ${oldG.toString()} to ${newG.toString()}: ` +
+        `value ${v.toString()} does not scale to an integer (result: ${result.toString()}). ` +
+        `Try a granularity that is a multiple or divisor of the current one.`,
+      );
+    }
+    return result;
+  }
+
+  const newGridW = scale(c.gridW);
+  const newGridH = scale(c.gridH);
+
+  const newFurniture = c.furniture.map((f) => ({
+    ...f,
+    pos: { x: scale(f.pos.x), y: scale(f.pos.y) },
+    w: scale(f.w),
+    h: scale(f.h),
+    occupants: [...f.occupants],
+  }));
+
+  return {
+    ...c,
+    gridW: newGridW,
+    gridH: newGridH,
+    cellsPerUnit: newG,
+    furniture: newFurniture,
+    // thresholdUnits is in units — do NOT change it.
+  };
+}
+
+// ---------------------------------------------------------------------------
+// setThreshold — change the proximity threshold in units
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a new Classroom with `thresholdUnits` set to `units`.
+ *
+ * The threshold is stored in UNITS (not raw cells) so it remains correct
+ * regardless of grid granularity (cellsPerUnit). This is the single domain
+ * mutation for the "Nearness" control in the settings popover (§13.4).
+ *
+ * Constraints:
+ *  - units must be a positive finite number.
+ *  - Throws TypeError if units ≤ 0 or not finite.
+ *
+ * The returned Classroom is a new object (immutable update pattern).
+ * Furniture and roster are NOT touched — only the scalar field changes.
+ */
+export function setThreshold(c: Classroom, units: number): Classroom {
+  if (!Number.isFinite(units) || units <= 0) {
+    throw new TypeError(`thresholdUnits must be a positive finite number, got ${String(units)}`);
+  }
+  if (c.thresholdUnits === units) return c;
+  return { ...c, thresholdUnits: units };
+}
+
+// ---------------------------------------------------------------------------
+// Source-of-truth sync helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a new Classroom where every real-student occupant copy is replaced
+ * with the corresponding Student from `roster` (looked up by id).
+ *
+ * This must be called after ANY mutation to a real Student in the roster
+ * (preference add/remove, rename, …) so that the embedded copies in
+ * `furniture.occupants` never become stale. Fixture occupants are left
+ * untouched — they are part of the room geometry and are not in the roster.
+ *
+ * If a student id in the furniture is no longer present in the roster (the
+ * student was deleted), the occupant is vacated (occupants → []).
+ */
+export function syncRosterToClassroom(
+  c: Classroom,
+  roster: readonly Student[],
+): Classroom {
+  const rosterById = new Map<string, Student>(roster.map((s) => [s.id, s]));
+
+  const needsUpdate = c.furniture.some((f) => {
+    const occ = occupant(f);
+    if (occ === undefined || occ.isFixture) return false;
+    const fresh = rosterById.get(occ.id);
+    // Needs update if not in roster or the object reference differs
+    return fresh === undefined || fresh !== occ;
+  });
+
+  // Short-circuit when no desk has a stale real occupant
+  if (!needsUpdate) return c;
+
+  return {
+    ...c,
+    furniture: c.furniture.map((f) => {
+      const occ = occupant(f);
+      if (occ === undefined || occ.isFixture) return f;
+
+      const fresh = rosterById.get(occ.id);
+      if (fresh === undefined) {
+        // Student was removed from roster — vacate the seat
+        return { ...f, occupants: [] };
+      }
+      if (fresh === occ) return f; // already in sync
+      return { ...f, occupants: [fresh] };
+    }),
   };
 }
 

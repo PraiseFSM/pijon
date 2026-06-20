@@ -15,7 +15,7 @@ import { SeatGraph, PROXIMITY_THRESHOLD } from './seatGraph.js';
 import { furnitureId, studentId } from './types.js';
 import { makeStudent, makeFixture } from './student.js';
 import { assignOccupant } from './furniture.js';
-import { fixtureId } from './classroom.js';
+import { fixtureId, DEFAULT_THRESHOLD_UNITS, DEFAULT_CELLS_PER_UNIT } from './classroom.js';
 import type { Furniture } from './furniture.js';
 import type { Classroom } from './classroom.js';
 import type { FurnitureId } from './types.js';
@@ -78,6 +78,8 @@ function mkClassroom(...furniture: Furniture[]): Classroom {
     gridW: 20,
     gridH: 20,
     furniture,
+    cellsPerUnit: DEFAULT_CELLS_PER_UNIT,
+    thresholdUnits: DEFAULT_THRESHOLD_UNITS,
   };
 }
 

@@ -49,12 +49,18 @@ import type { Student } from './student.js';
 import type { Furniture } from './furniture.js';
 import type { Classroom } from './classroom.js';
 import { capacity, occupant, isFixture } from './furniture.js';
+import { DEFAULT_THRESHOLD_UNITS } from './classroom.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const PROXIMITY_THRESHOLD = 1.5; // grid units
+/**
+ * Default proximity threshold in UNITS (not raw cells).
+ * At G=1 (default cellsPerUnit) this equals the raw cell threshold — so all
+ * existing call sites that relied on the old constant continue to work.
+ */
+export const PROXIMITY_THRESHOLD = DEFAULT_THRESHOLD_UNITS; // 1.5 units
 
 // ---------------------------------------------------------------------------
 // Center-to-center distance (grid units)
@@ -108,8 +114,22 @@ export class SeatGraph {
 
   // -------------------------------------------------------------------------
 
+  /**
+   * Build the SeatGraph for a classroom.
+   *
+   * `proximityThreshold` is interpreted as a value in UNITS when the classroom
+   * has `cellsPerUnit` set (i.e. it is converted to fine-cell space before
+   * comparing distances). The default is `PROXIMITY_THRESHOLD` (1.5 units),
+   * which preserves the existing neighbour relationships at any granularity.
+   *
+   * Legacy call sites that pass a raw numeric threshold continue to work: at
+   * the default granularity (cellsPerUnit = 1) units = cells, so thresholdCells
+   * = thresholdUnits * 1 = thresholdUnits unchanged.
+   */
   constructor(classroom: Classroom, proximityThreshold: number = PROXIMITY_THRESHOLD) {
-    this.proximityThreshold = proximityThreshold;
+    // Convert the threshold from units to fine cells.
+    const thresholdInCells = proximityThreshold * classroom.cellsPerUnit;
+    this.proximityThreshold = thresholdInCells;
     this.occupants = new Map();
     this.locked = new Set();
 
@@ -147,7 +167,7 @@ export class SeatGraph {
         const f2 = all[j];
         // Same noUncheckedIndexedAccess guard as above.
         if (f2 === undefined) continue;
-        if (furnitureDistance(f1, f2) <= proximityThreshold) {
+        if (furnitureDistance(f1, f2) <= thresholdInCells) {
           edges.get(f1.id)?.add(f2.id);
           edges.get(f2.id)?.add(f1.id);
         }

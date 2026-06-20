@@ -1,57 +1,155 @@
 /**
- * StudentEditor — Phase 8.
+ * StudentEditor — Phase 8, merged with PreferenceEditor in §12.4.
  *
- * An EditorMode that implements "The Teacher's Workflow":
- *   1. Import a student roster from CSV (SidePanel — FileReader, no network).
- *   2. Allocate / smart-shuffle students into desks via GreedyAllocator or BogoAllocator.
- *   3. Drag a student from one desk to another (swap if occupied, move if empty).
- *   4. Right-click a desk to toggle lock/unlock.
- *   5. Show neighbor preview (right-click) and violation highlighting (toolbar toggle).
- *   6. Export roster to full-format CSV (Blob download — no network).
- *   7. Undo / Redo.
+ * One tool, two panels:
+ *   Left SidePanel  — roster: manual add, student list (click to select, × to remove),
+ *                     Import CSV at the bottom.
+ *   Right RightPanel — preferences for the selected student: assigner-mode toggle at top,
+ *                      show-links toggle, per-student pref list (remove buttons),
+ *                      add-pref form (target dropdown + weight).
  *
- * Design notes (same template as FurnitureEditor):
- *  - All transient drag / hover / neighbor state lives in module-level vars.
- *  - deactivate() clears all transient state + the cached SeatGraph.
- *  - paintOverlay() draws the delta: drag ghost, lock badges, violation tint, neighbor highlight.
- *  - SeatGraph is rebuilt only when the classroom or proximity threshold changes.
+ * Canvas interaction has two modes (toggled by the right panel):
+ *   Drag mode (default) — drag students between desks (swap/move).
+ *   Assigner mode       — click student 1, then student 2 → setMutualPreference;
+ *                         ESC cancels; self-target no-op.
  *
- * Violation parity with prototype's _has_violation():
- *  Avoid-preferences (weight < 0) are checked bidirectionally:
- *    a) Student S at desk D: for each avoid-pref targeting student/fixture T,
- *       if T is currently seated and is a neighbor of D → violation.
- *    b) Bidirectional: for each OTHER placed student P who has an avoid-pref for S,
- *       if P's desk neighbors D → violation.
- *  Positive-weight (prefer) prefs are NOT flagged as violations here — matches the Python
- *  prototype which only highlights avoid violations, not unmet attract-preferences.
+ * paintOverlay draws:
+ *   - Drag ghost, drag source fade, drag target highlight (drag mode only).
+ *   - Lock badges.
+ *   - Violation tint (when showViolations=true).
+ *   - Neighbor preview (right-click).
+ *   - Assigner first-selection amber ring (assigner mode only).
+ *   - Preference links — green=prefer, red=avoid — between seated students (when showLinks=true).
  *
- * Save/Load Arrangement:
- *  The PersistenceHandle is not reachable inside EditorMode (it lives in the App shell,
- *  Phase 9). The Save/Load buttons call console.warn stubs — Phase 9 passes real callbacks.
- *
- * LOCAL-FIRST: no fetch(), no XHR, no WebSocket. CSV import uses FileReader on a local file;
- * CSV export builds a Blob and triggers a <a> download — all in-memory.
+ * LOCAL-FIRST: no fetch(), no XHR, no WebSocket. CSV import uses FileReader on a
+ * local file; CSV export builds a Blob and triggers a <a> download.
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
-import type { FurnitureId } from '../../domain/types.js';
+import type { FurnitureId, StudentId } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
 import { capacity, occupant, isFixture as isFurnitureFixture } from '../../domain/furniture.js';
 import type { Student } from '../../domain/student.js';
-import { SeatGraph, PROXIMITY_THRESHOLD } from '../../domain/seatGraph.js';
+import type { Preference } from '../../domain/preference.js';
+import { SeatGraph } from '../../domain/seatGraph.js';
 import { GreedyAllocator } from '../../domain/allocators/greedy.js';
 import { BogoAllocator } from '../../domain/allocators/bogo.js';
+import type { Allocator } from '../../domain/allocators/types.js';
 import { exportCsv } from '../../domain/io/csv.js';
 import type { Classroom } from '../../domain/classroom.js';
 import { assignments as classroomAssignments } from '../../domain/classroom.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
 import { usePijonStore } from '../../state/store.js';
+import { useSeatingIssues } from '../../state/hooks.js';
+import { SettingsMenu, GearButton } from '../shell/SettingsMenu.js';
 
 // ---------------------------------------------------------------------------
-// Module-level transient state (mirrors FurnitureEditor pattern)
-// Cleared on deactivate() so no artifacts leak on tool-switch.
+// §13.2 — Allocator registry (drives the split-button dropdown)
 // ---------------------------------------------------------------------------
+
+/**
+ * Registered seating algorithms. Adding a new algorithm = add one entry here.
+ * The label is shown in the dropdown; the factory builds the Allocator instance.
+ * Driven from the existing allocator classes — no hardcoding in the UI.
+ */
+export interface AllocatorEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly factory: () => Allocator;
+}
+
+export const ALLOCATOR_REGISTRY: readonly AllocatorEntry[] = [
+  { id: 'greedy', label: 'Greedy', factory: () => new GreedyAllocator() },
+  { id: 'bogo',   label: 'Random', factory: () => new BogoAllocator() },
+] as const;
+
+/**
+ * The two action variants for the split-button.
+ * - 'allocate'     — seats ALL students from scratch (existing seating cleared per allocator).
+ * - 'smart_shuffle' — re-seats respecting locks (locked students stay put).
+ */
+export type ActionVariant = 'allocate' | 'smart_shuffle';
+
+// ---------------------------------------------------------------------------
+// §13.7 — Roster-drag: HTML5 drag from the roster list onto a desk
+//
+// We stash the dragged studentId at module level so Firefox / Safari can read
+// it during dragover (those browsers return "" from dataTransfer.getData() in
+// dragover events — the spec restricts getData to drop events).
+// Mirror of the §13.1 pattern in FurnitureEditor.
+// ---------------------------------------------------------------------------
+
+/** dataTransfer MIME key carrying the studentId. */
+export const DRAG_STUDENT_ID_KEY = 'application/x-pijon-student-id';
+
+/** Module-level stash for Firefox / Safari dragover fallback. */
+let _draggedStudentIdStash: StudentId | null = null;
+
+/** Called by the roster item's onDragStart to stash the id. */
+export function stashDraggedStudentId(id: StudentId): void {
+  _draggedStudentIdStash = id;
+}
+
+/** Called on dragend / drop to prevent the stash bleeding to the next drag. */
+export function clearDraggedStudentIdStash(): void {
+  _draggedStudentIdStash = null;
+}
+
+/**
+ * Read the dragged studentId from the event, falling back to the module stash
+ * when getData() returns "" (Firefox/Safari during dragover).
+ */
+export function readDraggedStudentId(e: DragEvent): StudentId | null {
+  let id = e.dataTransfer?.getData(DRAG_STUDENT_ID_KEY) ?? '';
+  if (!id) id = e.dataTransfer?.getData('text/plain') ?? '';
+  if (!id && _draggedStudentIdStash !== null) id = _draggedStudentIdStash;
+  return (id as StudentId) || null;
+}
+
+/**
+ * Lazy-created transparent 1px canvas used as the replacement drag-image so
+ * the browser shows NO ghost and only our canvas overlay is visible.
+ * Mirrors the §13.1 approach in FurnitureEditor.
+ */
+let _transparentDragImageStudent: HTMLCanvasElement | null = null;
+
+function getTransparentDragImage(): HTMLCanvasElement {
+  if (_transparentDragImageStudent === null) {
+    const c = document.createElement('canvas');
+    c.width = 1;
+    c.height = 1;
+    _transparentDragImageStudent = c;
+  }
+  return _transparentDragImageStudent;
+}
+
+// ---------------------------------------------------------------------------
+// §13.7 — Drop-target highlight state (live canvas feedback during dragover)
+// ---------------------------------------------------------------------------
+
+/** FurnitureId of the desk currently being hovered during a roster-drag. */
+let rosterDragHoverFid: import('../../domain/types.js').FurnitureId | null = null;
+
+// ---------------------------------------------------------------------------
+// §13.6 — Callback bridge: first-selected student for assigner-mode toolbar hint
+// ---------------------------------------------------------------------------
+
+/**
+ * Callback registered by the AssignerHintHost component so the canvas event
+ * handler (onPointerDown) can push the first-selected student's name into the
+ * React tree as a visible hint.
+ *
+ * null  → no student selected (hint cleared).
+ * string → name of the selected student.
+ */
+let setAssignerFirstStudentCallback: ((name: string | null) => void) | null = null;
+
+// ---------------------------------------------------------------------------
+// Module-level transient state — cleared in deactivate()
+// ---------------------------------------------------------------------------
+
+// ---- Drag mode state -------------------------------------------------------
 
 /** Furniture being dragged (source). null when idle. */
 let dragSourceFid: FurnitureId | null = null;
@@ -69,21 +167,101 @@ let neighborPreviewFid: FurnitureId | null = null;
 let cachedGraph: SeatGraph | null = null;
 /** The classroom object the cache was built from (reference equality check). */
 let cachedGraphClassroom: Classroom | null = null;
-/** The threshold the cache was built with. */
-let cachedGraphThreshold: number = PROXIMITY_THRESHOLD;
+/** The threshold the cache was built with (in units). */
+let cachedGraphThreshold = 0;
 
-/** Editor-local mutable state (shared with Toolbar/SidePanel via closure / store). */
-let showViolations = false;
-let nearness: number = PROXIMITY_THRESHOLD;
+// showViolations and nearness (thresholdUnits) are no longer editor-local module vars.
+// §13.4: nearness is classroom.thresholdUnits (store) — single source of truth.
+// §13.5: showViolations is store.showViolations — persisted, defaults to true.
+// Both are read from the store at paint time (see getSeatGraph / paintStudentOverlay).
+
+// ---- Assigner mode state ---------------------------------------------------
+
+/**
+ * Whether the preference-assigner (marker) mode is active.
+ * When true, pointer interaction does the marker flow; when false, drag flow.
+ * Driven by the RightPanel toggle; stored module-level so event handlers can read it.
+ */
+let assignerModeActive = false;
+
+/** FurnitureId of the first-selected desk in assigner mode (step 1 of the marker flow). */
+let markerFirstFid: FurnitureId | null = null;
+/** The student who occupies markerFirstFid. */
+let markerFirstStudent: Student | null = null;
+
+/** Current preference weight for the assigner mode. Default: -1.0 (avoid). */
+let currentWeight = -1.0;
+
+/** Whether to draw preference links between currently-seated students. */
+let showLinks = false;
+
+// ---------------------------------------------------------------------------
+// §13.6 — Pulse animation loop
+//
+// The pulse highlight around the first-selected desk in assigner mode uses
+// Date.now() in paintStudentOverlay, but paintOverlay only runs when
+// requestRepaint() is called — so without an animation loop the highlight is
+// effectively static (it only updates on the next user interaction).
+//
+// Solution: while a first student is selected, drive a continuous rAF loop that
+// calls requestRepaint() ~60fps. The loop stops the moment markerFirstFid is
+// cleared (second click / ESC / deactivate / editor switch) so there is no leak.
+// ---------------------------------------------------------------------------
+
+/** RAF handle for the pulse animation loop. null = not running. */
+let pulseRafHandle: number | null = null;
+
+/** requestRepaint function captured on activate — used by the pulse loop. */
+let pulseRepaintFn: (() => void) | null = null;
+
+/** Start the pulse loop. No-op if already running or no repaint fn is available. */
+function startPulseLoop(): void {
+  if (pulseRafHandle !== null) return; // already running
+  if (pulseRepaintFn === null) return;
+
+  const loop = () => {
+    // Stop if markerFirstFid was cleared (second click / ESC / deactivate)
+    if (markerFirstFid === null) {
+      pulseRafHandle = null;
+      return;
+    }
+    pulseRepaintFn?.();
+    pulseRafHandle = requestAnimationFrame(loop);
+  };
+
+  pulseRafHandle = requestAnimationFrame(loop);
+}
+
+/** Stop the pulse loop and cancel any pending RAF frame. */
+function stopPulseLoop(): void {
+  if (pulseRafHandle !== null) {
+    cancelAnimationFrame(pulseRafHandle);
+    pulseRafHandle = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Callbacks bridging the canvas EditorMode object to React-stateful components
+// ---------------------------------------------------------------------------
+
+/** Callback registered by StudentSidePanelWithMenu so onContextMenu can show the menu. */
+let showContextMenuCallback:
+  | ((state: ContextMenuState) => void)
+  | null = null;
+
+/** Callback registered by StudentSidePanelWithMenu so onPointerDown / deactivate can close it. */
+let closeContextMenuCallback: (() => void) | null = null;
+
+/**
+ * Callback registered by the RightPanel to toggle assigner mode from outside
+ * the React component (so the canvas event handlers can read the current value).
+ */
+let setAssignerModeCallback: ((on: boolean) => void) | null = null;
 
 // ---------------------------------------------------------------------------
 // SeatGraph cache helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Return a SeatGraph for the given classroom + threshold.
- * Rebuilds only when classroom reference or threshold changed.
- */
 function getSeatGraph(classroom: Classroom, threshold: number): SeatGraph {
   if (
     cachedGraph !== null &&
@@ -102,29 +280,19 @@ function getSeatGraph(classroom: Classroom, threshold: number): SeatGraph {
 function clearGraphCache(): void {
   cachedGraph = null;
   cachedGraphClassroom = null;
+  cachedGraphThreshold = 0;
 }
 
 // ---------------------------------------------------------------------------
 // Violation logic (port of SeatingGrid._has_violation — bidirectional avoid)
 // ---------------------------------------------------------------------------
 
-/**
- * True when placing student S at desk fid violates any avoid-preference
- * (bidirectionally), using the current classroom assignments and the SeatGraph.
- *
- * Port of Python SeatingGrid._has_violation():
- *   a) S avoids someone who is currently a neighbor of fid.
- *   b) Someone who avoids S is seated at a neighbor of fid.
- *
- * Positive-weight prefs (prefer) are deliberately NOT flagged — only avoidances.
- */
 function hasViolation(
   student: Student,
   fid: FurnitureId,
   arrangement: Map<FurnitureId, Student>,
   graph: SeatGraph,
 ): boolean {
-  // Build studentId → furnitureId map (real students only, not the student itself)
   const sidToFid = new Map<string, FurnitureId>();
   for (const [f, s] of arrangement) {
     if (!s.isFixture && f !== fid) {
@@ -134,7 +302,7 @@ function hasViolation(
 
   // a) S's own avoid-preferences
   for (const pref of student.preferences) {
-    if (pref.weight >= 0) continue; // only avoidances
+    if (pref.weight >= 0) continue;
 
     if (pref.kind === 'student') {
       const targetFid = sidToFid.get(pref.targetId);
@@ -142,7 +310,6 @@ function hasViolation(
         return true;
       }
     } else if (pref.kind === 'furniture') {
-      // pref.targetId is a StudentId (fixture's student id) — look up via fixtureIdToFid
       const fixtureFid = graph.fixtureIdToFid.get(
         pref.targetId as import('../../domain/types.js').StudentId,
       );
@@ -150,7 +317,6 @@ function hasViolation(
         return true;
       }
     }
-    // 'location' prefs are not graphed
   }
 
   // b) Bidirectional: other placed students who avoid S
@@ -172,21 +338,104 @@ function hasViolation(
 }
 
 // ---------------------------------------------------------------------------
-// paintOverlay — draws on top of the base canvas pass
+// paintOverlay helpers
 // ---------------------------------------------------------------------------
 
-function paintOverlay(
+/**
+ * Draw the preference-link overlay (green=prefer, red=avoid) between all
+ * currently-seated students who share a student-kind preference.
+ * Called only when showLinks=true.
+ */
+function paintPreferenceLinks(
+  ctx2d: CanvasRenderingContext2D,
+  view: CanvasView,
+  classroom: Classroom,
+): void {
+  const furniture = classroom.furniture;
+  const arrangement: Map<FurnitureId, Student> = classroomAssignments(classroom);
+  const sidToFid = new Map<StudentId, FurnitureId>();
+  for (const [fid, student] of arrangement) {
+    if (!student.isFixture) {
+      sidToFid.set(student.id, fid);
+    }
+  }
+
+  for (const [fid, student] of arrangement) {
+    if (student.isFixture) continue;
+    const srcF = furniture.find((f) => f.id === fid);
+    if (srcF === undefined) continue;
+    const srcR = furnitureToPixelRect(srcF, view.cellSize);
+    const srcCx = srcR.x + srcR.w / 2;
+    const srcCy = srcR.y + srcR.h / 2;
+
+    for (const pref of student.preferences) {
+      if (pref.kind !== 'student') continue;
+      const tgtFid = sidToFid.get(pref.targetId);
+      if (tgtFid === undefined) continue;
+      const tgtF = furniture.find((f) => f.id === tgtFid);
+      if (tgtF === undefined) continue;
+      const tgtR = furnitureToPixelRect(tgtF, view.cellSize);
+      const tgtCx = tgtR.x + tgtR.w / 2;
+      const tgtCy = tgtR.y + tgtR.h / 2;
+
+      ctx2d.beginPath();
+      ctx2d.moveTo(srcCx, srcCy);
+      ctx2d.lineTo(tgtCx, tgtCy);
+      ctx2d.strokeStyle =
+        pref.weight > 0
+          ? 'rgba(46, 125, 50, 0.55)'   // prefer → green
+          : 'rgba(183, 28, 28, 0.55)';  // avoid → red
+      ctx2d.lineWidth = 1.5;
+      ctx2d.setLineDash([5, 4]);
+      ctx2d.stroke();
+      ctx2d.setLineDash([]);
+
+      // Small arrowhead at target
+      const angle = Math.atan2(tgtCy - srcCy, tgtCx - srcCx);
+      const arrowLen = 8;
+      const arrowAngle = Math.PI / 6;
+      ctx2d.beginPath();
+      ctx2d.moveTo(tgtCx, tgtCy);
+      ctx2d.lineTo(
+        tgtCx - arrowLen * Math.cos(angle - arrowAngle),
+        tgtCy - arrowLen * Math.sin(angle - arrowAngle),
+      );
+      ctx2d.moveTo(tgtCx, tgtCy);
+      ctx2d.lineTo(
+        tgtCx - arrowLen * Math.cos(angle + arrowAngle),
+        tgtCy - arrowLen * Math.sin(angle + arrowAngle),
+      );
+      ctx2d.lineWidth = 1.5;
+      ctx2d.stroke();
+    }
+  }
+}
+
+/**
+ * Full paintOverlay pass — draws all overlays for the StudentEditor.
+ *
+ * @param showViolationsFlag - from store.showViolations (§13.5, defaults true)
+ * @param thresholdUnits     - from classroom.thresholdUnits (§13.4, single source of truth)
+ */
+function paintStudentOverlay(
   ctx2d: CanvasRenderingContext2D,
   view: CanvasView,
   classroom: Classroom,
   locks: ReadonlySet<FurnitureId>,
+  showViolationsFlag: boolean,
+  thresholdUnits: number,
 ): void {
   ctx2d.save();
 
-  const graph = getSeatGraph(classroom, nearness);
+  // ---- Preference links (bottom-most overlay layer) -----
+  if (showLinks) {
+    paintPreferenceLinks(ctx2d, view, classroom);
+  }
+
+  // ---- Per-desk overlays ----------------------------
+  const graph = getSeatGraph(classroom, thresholdUnits);
   const arrangement = classroomAssignments(classroom);
 
-  // Build neighbor set for preview
   const neighborSet = new Set<FurnitureId>();
   if (neighborPreviewFid !== null) {
     for (const nbr of graph.neighbors(neighborPreviewFid)) {
@@ -205,8 +454,8 @@ function paintOverlay(
     const isNeighborSource = fid === neighborPreviewFid;
     const isNeighbor = neighborSet.has(fid);
 
-    // --- Drag target highlight ---
-    if (isDragTarget) {
+    // --- Drag target highlight (pointer drag between desks) ---
+    if (!assignerModeActive && isDragTarget) {
       ctx2d.fillStyle = 'rgba(21, 101, 192, 0.22)';
       ctx2d.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
       ctx2d.strokeStyle = 'rgba(21, 101, 192, 0.9)';
@@ -214,8 +463,17 @@ function paintOverlay(
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
 
+    // --- §13.7 roster-drag drop-target highlight ---
+    if (rosterDragHoverFid !== null && fid === rosterDragHoverFid) {
+      ctx2d.fillStyle = 'rgba(46, 125, 50, 0.18)';
+      ctx2d.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+      ctx2d.strokeStyle = 'rgba(46, 125, 50, 0.85)';
+      ctx2d.lineWidth = 2;
+      ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    }
+
     // --- Drag source fade ---
-    if (isDragSource) {
+    if (!assignerModeActive && isDragSource) {
       ctx2d.fillStyle = 'rgba(200, 200, 200, 0.5)';
       ctx2d.fillRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
       ctx2d.restore();
@@ -223,8 +481,8 @@ function paintOverlay(
       continue;
     }
 
-    // --- Violation tint (show violations mode, real occupied desk) ---
-    if (showViolations && occ !== undefined && !isFixt) {
+    // --- Violation tint ---
+    if (showViolationsFlag && occ !== undefined && !isFixt) {
       const violated = hasViolation(occ, fid, arrangement, graph);
       if (violated) {
         ctx2d.fillStyle = 'rgba(211, 47, 47, 0.22)';
@@ -254,7 +512,7 @@ function paintOverlay(
       }
     }
 
-    // --- Lock badge (small padlock icon via unicode, top-right corner) ---
+    // --- Lock badge ---
     if (locks.has(fid) && occ !== undefined && !isFixt) {
       const badgeSize = Math.max(10, Math.round(view.cellSize * 0.22));
       const bx = r.x + r.w - badgeSize - 2;
@@ -269,8 +527,34 @@ function paintOverlay(
     }
   }
 
+  // --- Assigner mode: pulsing highlight ring around first-selected desk (§13.6) ---
+  if (assignerModeActive && markerFirstFid !== null) {
+    const srcF = classroom.furniture.find((f) => f.id === markerFirstFid);
+    if (srcF !== undefined) {
+      const r = furnitureToPixelRect(srcF, view.cellSize);
+
+      // Pulse: alpha oscillates between 0.6 and 1.0 at ~2 Hz
+      const pulse = 0.80 + 0.20 * Math.sin((Date.now() / 1000) * Math.PI * 2 * 2);
+
+      // Outer glow fill
+      ctx2d.fillStyle = `rgba(255, 152, 0, ${(0.22 * pulse).toFixed(3)})`;
+      ctx2d.fillRect(r.x, r.y, r.w, r.h);
+
+      // Inner thick amber ring (inset by 1px so it sits inside the furniture cell)
+      const inset = 1;
+      ctx2d.strokeStyle = `rgba(230, 100, 0, ${pulse.toFixed(3)})`;
+      ctx2d.lineWidth = 4;
+      ctx2d.strokeRect(r.x + inset, r.y + inset, r.w - inset * 2, r.h - inset * 2);
+
+      // Outer ring (slightly larger, thinner, to create a double-ring effect)
+      ctx2d.strokeStyle = `rgba(255, 193, 7, ${(0.7 * pulse).toFixed(3)})`;
+      ctx2d.lineWidth = 1.5;
+      ctx2d.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+    }
+  }
+
   // --- Drag ghost (floating label under the pointer) ---
-  if (dragStudent !== null && dragCanvasPos !== null) {
+  if (!assignerModeActive && dragStudent !== null && dragCanvasPos !== null) {
     const label = dragStudent.name;
     const ghostW = Math.max(70, label.length * 7 + 16);
     const ghostH = 26;
@@ -307,7 +591,7 @@ function paintOverlay(
 }
 
 // ---------------------------------------------------------------------------
-// Context menu component (tiny inline menu for lock/unlock + neighbor toggle)
+// Context menu state type
 // ---------------------------------------------------------------------------
 
 interface ContextMenuState {
@@ -323,32 +607,349 @@ interface ContextMenuState {
 // Toolbar component
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// §13.6 — AssignerHint: toolbar strip that names the first-selected student
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders a coloured hint banner when the first student is selected in assigner
+ * mode. The banner is driven by `setAssignerFirstStudentCallback` so the canvas
+ * event handler (running outside React) can update it.
+ *
+ * Rendered inside StudentToolbar so it stays in the toolbar row.
+ */
+const AssignerHint: React.FC = () => {
+  const [firstName, setFirstName] = useState<string | null>(null);
+
+  // Register / unregister the callback bridge so canvas events can update us.
+  useEffect(() => {
+    setAssignerFirstStudentCallback = setFirstName;
+    return () => {
+      setAssignerFirstStudentCallback = null;
+    };
+  }, []);
+
+  if (firstName === null) return null;
+
+  return (
+    <span
+      data-testid="assigner-hint"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '3px 10px',
+        borderRadius: 4,
+        background: '#ff6f00',
+        color: '#fff',
+        fontSize: '0.8rem',
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+        animation: 'pulseBg 1s ease-in-out infinite',
+      }}
+    >
+      Linking <em style={{ fontStyle: 'normal', textDecoration: 'underline' }}>{firstName}</em>…
+      click another student (ESC to cancel)
+    </span>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// §13.2 — SplitButton: primary action + caret dropdown for algorithm/variant
+// ---------------------------------------------------------------------------
+
+/**
+ * A split-button combining the action trigger (primary button) with a caret
+ * that opens a dropdown to choose the algorithm and variant.
+ *
+ * - Primary button label reflects the current variant ("Allocate" / "Smart Shuffle").
+ * - Dropdown rows are: variant radio + algorithm radio, all in one small panel.
+ * - Last choice is remembered in the parent toolbar's useState.
+ */
+const SplitButton: React.FC<{
+  algorithmId: string;
+  variant: ActionVariant;
+  onRun: () => void;
+  onChangeAlgorithm: (id: string) => void;
+  onChangeVariant: (v: ActionVariant) => void;
+}> = ({ algorithmId, variant, onRun, onChangeAlgorithm, onChangeVariant }) => {
+  const [dropOpen, setDropOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close the dropdown on click outside
+  useEffect(() => {
+    if (!dropOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setDropOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleOutside, { capture: true });
+    return () => { window.removeEventListener('mousedown', handleOutside, { capture: true }); };
+  }, [dropOpen]);
+
+  const primaryLabel = variant === 'allocate' ? 'Allocate' : 'Smart Shuffle';
+  const primaryTitle =
+    variant === 'allocate'
+      ? 'Assign all students to desks from scratch'
+      : 'Re-seat respecting preferences (locked seats stay)';
+
+  const primaryStyle: React.CSSProperties = {
+    padding: '4px 10px',
+    borderRadius: '4px 0 0 4px',
+    border: '1px solid #1565c0',
+    borderRight: 'none',
+    background: '#1565c0',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+  };
+
+  const caretStyle: React.CSSProperties = {
+    padding: '4px 7px',
+    borderRadius: '0 4px 4px 0',
+    border: '1px solid #1565c0',
+    borderLeft: '1px solid rgba(255,255,255,0.35)',
+    background: '#1565c0',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: '0.75rem',
+    lineHeight: 1,
+  };
+
+  const dropStyle: React.CSSProperties = {
+    position: 'absolute',
+    top: 'calc(100% + 4px)',
+    left: 0,
+    zIndex: 200,
+    background: '#fff',
+    border: '1px solid #c5cae9',
+    borderRadius: 6,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+    minWidth: 200,
+    padding: '8px 0',
+    fontSize: '0.82rem',
+  };
+
+  const sectionTitle: React.CSSProperties = {
+    padding: '2px 12px 4px',
+    fontSize: '0.68rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: '#888',
+  };
+
+  const radioRow: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '4px 12px',
+    cursor: 'pointer',
+    userSelect: 'none',
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex' }}>
+      {/* Primary action button */}
+      <button
+        type="button"
+        style={primaryStyle}
+        onClick={onRun}
+        title={primaryTitle}
+        data-testid="split-btn-primary"
+      >
+        {primaryLabel}
+      </button>
+
+      {/* Caret toggle */}
+      <button
+        type="button"
+        style={caretStyle}
+        onClick={() => { setDropOpen((o) => !o); }}
+        title="Choose algorithm and action"
+        aria-haspopup="listbox"
+        aria-expanded={dropOpen}
+        data-testid="split-btn-caret"
+      >
+        ▾
+      </button>
+
+      {/* Dropdown panel */}
+      {dropOpen && (
+        <div style={dropStyle} role="listbox" data-testid="split-btn-dropdown">
+          {/* --- Variant section --- */}
+          <div style={sectionTitle}>Action</div>
+          {(['allocate', 'smart_shuffle'] as const).map((v) => (
+            <label key={v} style={{ ...radioRow, fontWeight: v === variant ? 600 : 400 }}>
+              <input
+                type="radio"
+                name="split-variant"
+                value={v}
+                checked={variant === v}
+                onChange={() => { onChangeVariant(v); }}
+                data-testid={`split-variant-${v}`}
+              />
+              {v === 'allocate' ? 'Allocate (from scratch)' : 'Smart Shuffle (keep locks)'}
+            </label>
+          ))}
+
+          <div style={{ borderTop: '1px solid #eee', margin: '6px 0' }} />
+
+          {/* --- Algorithm section --- */}
+          <div style={sectionTitle}>Algorithm</div>
+          {ALLOCATOR_REGISTRY.map((entry) => (
+            <label key={entry.id} style={{ ...radioRow, fontWeight: entry.id === algorithmId ? 600 : 400 }}>
+              <input
+                type="radio"
+                name="split-algorithm"
+                value={entry.id}
+                checked={algorithmId === entry.id}
+                onChange={() => {
+                  onChangeAlgorithm(entry.id);
+                }}
+                data-testid={`split-algorithm-${entry.id}`}
+              />
+              {entry.label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// §13.8 — SeatingIssuesBanner
+//
+// Non-blocking warning / error banner shown below the Students toolbar whenever
+// the current seating has problems (more students than seats, or unplaced
+// students after an allocate/shuffle). The domain keeps messages OUT — the
+// banner translates structured SeatingIssue data into human-readable text.
+//
+// Updates live: useSeatingIssues() subscribes to classroom + roster separately
+// so it re-renders whenever either changes without the infinite-loop footgun
+// that direct use of selectSeatingIssues would cause in Zustand v5.
+// ---------------------------------------------------------------------------
+
+const SeatingIssuesBanner: React.FC = () => {
+  // useSeatingIssues() subscribes to classroom + roster as stable primitives and
+  // derives the result with useMemo.  Do NOT replace this with
+  // usePijonStore(selectSeatingIssues) — that returns a fresh object every call
+  // and would cause an infinite render loop under Zustand v5.
+  const result = useSeatingIssues();
+
+  // Nothing to show when seating is valid.
+  if (result.valid) return null;
+
+  // Separate the two issue kinds for distinct messaging.
+  const overCapacity = result.issues.find((i) => i.kind === 'over-capacity');
+  const unplaced = result.issues.find((i) => i.kind === 'unplaced');
+
+  // Build message parts.
+  //
+  // Redundancy UX decision (§13.8):
+  //   When over-capacity is present, it already fully explains WHY students are
+  //   unplaced — the shortage is structural.  Surfacing a separate "X students
+  //   currently unplaced" sub-message alongside "X students can't be seated"
+  //   duplicates information and makes the banner feel alarmist.  We therefore
+  //   suppress the unplaced sub-message when over-capacity is the root cause.
+  //
+  //   When unplaced is the ONLY issue (enough seats exist but the arrangement is
+  //   partial), we surface it explicitly so the teacher knows to run Allocate.
+  const parts: string[] = [];
+
+  if (overCapacity?.kind === 'over-capacity') {
+    parts.push(
+      `${overCapacity.studentCount.toString()} students, ${overCapacity.seatCount.toString()} seats` +
+      ` — ${overCapacity.shortfall.toString()} student${overCapacity.shortfall !== 1 ? 's' : ''} can't be seated`,
+    );
+    // Unplaced sub-message intentionally omitted here: over-capacity already
+    // explains why students are unplaced (structural shortage).
+  } else if (unplaced?.kind === 'unplaced') {
+    // Unplaced-only: enough seats exist but arrangement is partial.
+    parts.push(
+      `${unplaced.count.toString()} student${unplaced.count !== 1 ? 's' : ''} not seated` +
+      ` (empty seats available — run Allocate to fill them)`,
+    );
+  }
+
+  // Pick colour: error (red) when seats are genuinely insufficient; warning
+  // (amber) when seats exist but some students haven't been placed yet.
+  const isError = overCapacity !== undefined;
+
+  const bannerStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '5px 12px',
+    background: isError ? '#ffebee' : '#fff8e1',
+    borderBottom: `1px solid ${isError ? '#ef9a9a' : '#ffe082'}`,
+    fontSize: '0.8rem',
+    color: isError ? '#b71c1c' : '#e65100',
+    fontWeight: 500,
+    lineHeight: 1.4,
+  };
+
+  const iconStyle: React.CSSProperties = {
+    flexShrink: 0,
+    fontSize: '1rem',
+  };
+
+  return (
+    <div
+      data-testid="seating-issues-banner"
+      role="alert"
+      aria-live="polite"
+      style={bannerStyle}
+    >
+      <span style={iconStyle}>{isError ? '⚠' : 'ℹ'}</span>
+      <span>{parts.join(' · ')}</span>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// StudentToolbar — wires SplitButton + undo/redo + file ops + settings
+// ---------------------------------------------------------------------------
+
 const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
-  const [algorithmChoice, setAlgorithmChoice] = useState<'greedy' | 'bogo'>('greedy');
-  const [violationsOn, setViolationsOn] = useState(false);
-  const [nearnessVal, setNearnessVal] = useState(PROXIMITY_THRESHOLD);
+  // §13.2: split-button state — algorithm id + variant, both remembered.
+  // Default: Greedy algorithm, Allocate variant.
+  // ALLOCATOR_REGISTRY always has at least one entry (greedy) — non-null assertion is safe.
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const [algorithmId, setAlgorithmId] = useState<string>(ALLOCATOR_REGISTRY[0]!.id);
+  const [variant, setVariant] = useState<ActionVariant>('allocate');
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsAnchorRef = useRef<HTMLDivElement>(null);
 
   const canUndo = ctx.store.historyPtr > 0;
   const canRedo = ctx.store.historyPtr < ctx.store.history.length - 1;
 
-  const makeAllocator = () =>
-    algorithmChoice === 'bogo' ? new BogoAllocator() : new GreedyAllocator();
+  /** Build the Allocator instance from the currently-selected algorithm. */
+  const makeAllocator = useCallback((): Allocator => {
+    // Fall back to the first entry (greedy) — registry always has at least one.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const entry = ALLOCATOR_REGISTRY.find((e) => e.id === algorithmId) ?? ALLOCATOR_REGISTRY[0]!;
+    return entry.factory();
+  }, [algorithmId]);
 
-  const handleAllocate = () => {
-    ctx.store.allocate(makeAllocator());
+  const handleRun = useCallback(() => {
+    const allocator = makeAllocator();
+    if (variant === 'allocate') {
+      ctx.store.allocate(allocator);
+    } else {
+      ctx.store.smartShuffle(allocator);
+    }
     clearGraphCache();
     ctx.canvas.requestRepaint();
-  };
-
-  const handleSmartShuffle = () => {
-    ctx.store.smartShuffle(makeAllocator());
-    clearGraphCache();
-    ctx.canvas.requestRepaint();
-  };
+  }, [makeAllocator, variant, ctx.store, ctx.canvas]);
 
   const handleClear = () => {
     ctx.store.clearArrangement();
-    // Clear drag state too in case a drag was in progress
     dragSourceFid = null;
     dragStudent = null;
     dragCanvasPos = null;
@@ -377,7 +978,6 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       return;
     }
     const csv = exportCsv(roster);
-    // Blob download — no network call
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -387,28 +987,10 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // Revoke after a tick so the download can start
     setTimeout(() => { URL.revokeObjectURL(url); }, 500);
   };
 
-  const handleToggleViolations = () => {
-    const next = !violationsOn;
-    setViolationsOn(next);
-    showViolations = next;
-    ctx.canvas.requestRepaint();
-  };
-
-  const handleNearnessChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    if (!Number.isFinite(val) || val <= 0) return;
-    setNearnessVal(val);
-    nearness = val;
-    clearGraphCache();
-    ctx.canvas.requestRepaint();
-  };
-
   const handleSave = () => {
-    // Use persistence handle from EditorContext (wired by Phase 9 shell).
     if (ctx.persistence === null) {
       console.warn('[StudentEditor] Persistence not yet available.');
       return;
@@ -417,13 +999,16 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   };
 
   const handleLoad = () => {
-    // Use persistence handle from EditorContext (wired by Phase 9 shell).
     if (ctx.persistence === null) {
       console.warn('[StudentEditor] Persistence not yet available.');
       return;
     }
     void ctx.persistence.openFromFile();
   };
+
+  const handleCloseSettings = useCallback(() => {
+    setSettingsOpen(false);
+  }, []);
 
   const btn: React.CSSProperties = {
     padding: '4px 10px',
@@ -437,121 +1022,148 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   };
 
   const btnDisabled: React.CSSProperties = { ...btn, opacity: 0.45, cursor: 'default' };
-  const btnToggled: React.CSSProperties = { ...btn, background: '#1565c0', color: '#fff', borderColor: '#1565c0' };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        gap: 4,
-        padding: '5px 10px',
-        background: '#f5f5f5',
-        borderBottom: '1px solid #ddd',
-      }}
-    >
-      <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: '#333' }}>
-        Students
-      </span>
-
-      {/* Algorithm picker */}
-      <select
-        value={algorithmChoice}
-        onChange={(e) => { setAlgorithmChoice(e.target.value as 'greedy' | 'bogo'); }}
-        style={{ fontSize: '0.8rem', padding: '3px 6px', borderRadius: 4, border: '1px solid #bbb', marginRight: 2 }}
-        title="Seating algorithm"
+    <>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 4,
+          padding: '5px 10px',
+          background: '#f5f5f5',
+          borderBottom: '1px solid #ddd',
+        }}
       >
-        <option value="greedy">Greedy</option>
-        <option value="bogo">Random</option>
-      </select>
+        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: '#333' }}>
+          Students
+        </span>
 
-      <button style={btn} type="button" onClick={handleAllocate} title="Assign all students to desks">
-        Allocate
-      </button>
-      <button style={btn} type="button" onClick={handleSmartShuffle} title="Re-seat respecting preferences (locked seats stay)">
-        Smart Shuffle
-      </button>
-
-      <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
-
-      <button style={btn} type="button" onClick={handleClear}>
-        Clear
-      </button>
-
-      <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
-
-      <button
-        style={canUndo ? btn : btnDisabled}
-        type="button"
-        onClick={canUndo ? handleUndo : undefined}
-        disabled={!canUndo}
-        title="Undo"
-      >
-        ↩ Undo
-      </button>
-      <button
-        style={canRedo ? btn : btnDisabled}
-        type="button"
-        onClick={canRedo ? handleRedo : undefined}
-        disabled={!canRedo}
-        title="Redo"
-      >
-        Redo ↪
-      </button>
-
-      <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
-
-      <button style={btn} type="button" onClick={handleExportCsv} title="Download roster as CSV">
-        Export CSV
-      </button>
-
-      <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
-
-      <button
-        style={violationsOn ? btnToggled : btn}
-        type="button"
-        onClick={handleToggleViolations}
-        title="Highlight desks with avoid-preference violations"
-      >
-        {violationsOn ? '⚠ Violations ON' : 'Show Violations'}
-      </button>
-
-      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.8rem', marginLeft: 4 }}>
-        <span style={{ color: '#555' }}>Nearness:</span>
-        <input
-          type="number"
-          min="0.5"
-          max="10"
-          step="0.5"
-          value={nearnessVal}
-          onChange={handleNearnessChange}
-          style={{ width: 58, padding: '2px 4px', borderRadius: 4, border: '1px solid #bbb', fontSize: '0.8rem' }}
-          title="Proximity threshold (grid units). 1.5 = orthogonal + diagonal neighbors."
+        {/* §13.2 — Single split-button replaces separate Allocate/SmartShuffle/<select> */}
+        <SplitButton
+          algorithmId={algorithmId}
+          variant={variant}
+          onRun={handleRun}
+          onChangeAlgorithm={setAlgorithmId}
+          onChangeVariant={setVariant}
         />
-      </label>
 
-      <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
 
-      <button style={btn} type="button" onClick={handleSave} title="Save classroom to a .pijon file">
-        Save Arr…
-      </button>
-      <button style={btn} type="button" onClick={handleLoad} title="Open a .pijon file">
-        Load Arr…
-      </button>
-    </div>
+        <button style={btn} type="button" onClick={handleClear}>
+          Clear
+        </button>
+
+        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+
+        <button
+          style={canUndo ? btn : btnDisabled}
+          type="button"
+          onClick={canUndo ? handleUndo : undefined}
+          disabled={!canUndo}
+          title="Undo"
+        >
+          ↩ Undo
+        </button>
+        <button
+          style={canRedo ? btn : btnDisabled}
+          type="button"
+          onClick={canRedo ? handleRedo : undefined}
+          disabled={!canRedo}
+          title="Redo"
+        >
+          Redo ↪
+        </button>
+
+        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+
+        <button style={btn} type="button" onClick={handleExportCsv} title="Download roster as CSV">
+          Export CSV
+        </button>
+
+        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+
+        <button style={btn} type="button" onClick={handleSave} title="Save classroom to a .pijon file">
+          Save Arr…
+        </button>
+        <button style={btn} type="button" onClick={handleLoad} title="Open a .pijon file">
+          Load Arr…
+        </button>
+
+        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+
+        {/* §13.6 — Assigner hint banner (appears when first student is selected) */}
+        <AssignerHint />
+
+        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+
+        {/* §13.3 Settings gear button + popover (houses §13.4 Nearness + §13.5 Violations) */}
+        <div ref={settingsAnchorRef} style={{ position: 'relative' }}>
+          <GearButton open={settingsOpen} onClick={() => { setSettingsOpen((prev) => !prev); }} />
+          <SettingsMenu ctx={ctx} open={settingsOpen} onClose={handleCloseSettings} />
+        </div>
+      </div>
+
+      {/* §13.8 — Seating issues banner: shown below toolbar, non-blocking, live */}
+      <SeatingIssuesBanner />
+    </>
   );
 };
 
 // ---------------------------------------------------------------------------
-// SidePanel — roster panel with CSV import
+// SidePanel — roster panel (left panel)
 // ---------------------------------------------------------------------------
 
-const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
+/**
+ * Pure roster panel — renders the student list, manual add, and CSV import.
+ * Order (top to bottom):
+ *   1. Header
+ *   2. Student count badge
+ *   3. Manual add-student form
+ *   4. Scrollable student list (click=select, ×=remove)
+ *   5. Import CSV (bottom-most control)
+ */
+const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const roster = ctx.store.roster;
+  const selectedStudentId = ctx.store.selectedStudentId;
+  const [addName, setAddName] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [importStatus, setImportStatus] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const realStudents = roster.filter((s) => !s.isFixture);
+  const fixtures = roster.filter((s) => s.isFixture);
+
+  const handleAddStudent = useCallback(() => {
+    const trimmed = addName.trim();
+    if (trimmed === '') return;
+    ctx.store.addStudent(trimmed);
+    setAddName('');
+  }, [addName, ctx.store]);
+
+  const handleAddKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') handleAddStudent();
+    },
+    [handleAddStudent],
+  );
+
+  const handleStudentClick = useCallback(
+    (id: StudentId) => {
+      const next = selectedStudentId === id ? null : id;
+      ctx.store.setSelectedStudentId(next);
+    },
+    [selectedStudentId, ctx.store],
+  );
+
+  const handleRemoveStudent = useCallback(
+    (id: StudentId, e: React.MouseEvent) => {
+      e.stopPropagation();
+      ctx.store.removeStudent(id);
+    },
+    [ctx.store],
+  );
 
   const handleImportClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -562,7 +1174,6 @@ const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       const file = e.target.files?.[0];
       if (file === undefined) return;
 
-      // Read file as text (FileReader — no network, no fetch)
       const reader = new FileReader();
       reader.onload = (ev) => {
         const text = ev.target?.result;
@@ -579,15 +1190,10 @@ const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         setImportStatus('Error: could not read file.');
       };
       reader.readAsText(file, 'UTF-8');
-
-      // Reset the file input so the same file can be re-imported
       e.target.value = '';
     },
     [ctx.store],
   );
-
-  const realStudents = roster.filter((s) => !s.isFixture);
-  const fixtures = roster.filter((s) => s.isFixture);
 
   const itemStyle: React.CSSProperties = {
     padding: '5px 8px',
@@ -596,13 +1202,15 @@ const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    cursor: 'pointer',
+    userSelect: 'none',
   };
 
   return (
     <div
       style={{
-        width: 170,
-        minWidth: 150,
+        width: 180,
+        minWidth: 160,
         display: 'flex',
         flexDirection: 'column',
         background: '#fafafa',
@@ -626,9 +1234,176 @@ const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         Roster
       </div>
 
-      {/* Import control */}
-      <div style={{ padding: '8px 10px', borderBottom: '1px solid #eee' }}>
-        {/* Hidden file input — FileReader path, no network */}
+      {/* Student count badge */}
+      <div
+        style={{
+          padding: '3px 10px',
+          fontSize: '0.72rem',
+          color: '#666',
+          borderBottom: '1px solid #eee',
+        }}
+      >
+        {realStudents.length === 0
+          ? 'No students loaded'
+          : `${realStudents.length.toString()} student${realStudents.length !== 1 ? 's' : ''}`}
+        {fixtures.length > 0 && `, ${fixtures.length.toString()} fixture${fixtures.length !== 1 ? 's' : ''}`}
+      </div>
+
+      {/* Scrollable student list */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {realStudents.map((s) => {
+          const isSelected = s.id === selectedStudentId;
+          return (
+            <div
+              key={s.id}
+              role="button"
+              tabIndex={0}
+              draggable
+              onDragStart={(e) => {
+                // §13.7 — set studentId payload + stash for Firefox/Safari fallback
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData(DRAG_STUDENT_ID_KEY, s.id);
+                e.dataTransfer.setData('text/plain', s.id);
+                stashDraggedStudentId(s.id);
+                // Suppress default ghost image so only our canvas overlay is visible
+                e.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
+              }}
+              onDragEnd={() => {
+                // Clear stash regardless of whether drop was accepted
+                clearDraggedStudentIdStash();
+              }}
+              style={{
+                ...itemStyle,
+                background: isSelected ? '#e3f2fd' : undefined,
+                borderLeft: isSelected ? '3px solid #1565c0' : '3px solid transparent',
+                cursor: 'grab',
+              }}
+              onClick={() => { handleStudentClick(s.id); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') handleStudentClick(s.id);
+              }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                {s.name}
+              </span>
+              {s.preferences.length > 0 && (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    marginLeft: 4,
+                    fontSize: '0.68rem',
+                    color: '#888',
+                    background: '#f0f0f0',
+                    borderRadius: 3,
+                    padding: '1px 4px',
+                  }}
+                  title={`${s.preferences.length.toString()} preference(s)`}
+                >
+                  {s.preferences.length}p
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={(e) => { handleRemoveStudent(s.id, e); }}
+                style={{
+                  flexShrink: 0,
+                  marginLeft: 4,
+                  padding: '1px 5px',
+                  fontSize: '0.68rem',
+                  border: '1px solid #ffcdd2',
+                  borderRadius: 3,
+                  background: '#ffebee',
+                  color: '#c62828',
+                  cursor: 'pointer',
+                  lineHeight: 1,
+                }}
+                title={`Remove ${s.name}`}
+                aria-label={`Remove ${s.name}`}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+
+        {fixtures.length > 0 && (
+          <>
+            <div
+              style={{
+                padding: '4px 8px 2px',
+                fontSize: '0.68rem',
+                color: '#999',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                borderTop: '1px solid #eee',
+                marginTop: 4,
+              }}
+            >
+              Fixtures
+            </div>
+            {fixtures.map((s) => (
+              <div key={s.id} style={{ ...itemStyle, color: '#9c27b0', fontStyle: 'italic', borderLeft: '3px solid transparent' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.name}
+                </span>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* Manual add-student form — just above Import CSV */}
+      <div
+        style={{
+          padding: '8px 10px 6px',
+          borderTop: '1px solid #eee',
+        }}
+      >
+        <div style={{ fontSize: '0.72rem', color: '#555', fontWeight: 600, marginBottom: 4 }}>
+          Add student:
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input
+            type="text"
+            value={addName}
+            onChange={(e) => { setAddName(e.target.value); }}
+            onKeyDown={handleAddKeyDown}
+            placeholder="Name…"
+            style={{
+              flex: 1,
+              padding: '3px 6px',
+              borderRadius: 4,
+              border: '1px solid #bbb',
+              fontSize: '0.78rem',
+              minWidth: 0,
+            }}
+            aria-label="New student name"
+          />
+          <button
+            type="button"
+            onClick={handleAddStudent}
+            disabled={addName.trim() === ''}
+            style={{
+              padding: '3px 8px',
+              borderRadius: 4,
+              border: '1px solid #90caf9',
+              background: addName.trim() === '' ? '#eee' : '#e3f2fd',
+              color: '#1565c0',
+              cursor: addName.trim() === '' ? 'default' : 'pointer',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+            aria-label="Add student"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* Import CSV — bottom-most control */}
+      <div style={{ padding: '0 10px 10px', borderTop: '1px solid #eee' }}>
         <input
           ref={fileInputRef}
           type="file"
@@ -655,7 +1430,7 @@ const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           Import CSV…
         </button>
 
-        {importStatus && (
+        {importStatus !== '' && (
           <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#2e7d32' }}>
             {importStatus}
           </div>
@@ -674,7 +1449,6 @@ const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           >
             <div style={{ fontWeight: 700, marginBottom: 2 }}>Warnings:</div>
             {warnings.map((w, i) => (
-              // key uses index since warnings list is rebuilt on each import
               // eslint-disable-next-line react/no-array-index-key
               <div key={i}>• {w}</div>
             ))}
@@ -682,114 +1456,44 @@ const StudentSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         )}
       </div>
 
-      {/* Student count badge */}
-      <div
-        style={{
-          padding: '3px 10px',
-          fontSize: '0.72rem',
-          color: '#666',
-          borderBottom: '1px solid #eee',
-        }}
-      >
-        {realStudents.length === 0
-          ? 'No students loaded'
-          : `${realStudents.length.toString()} student${realStudents.length !== 1 ? 's' : ''}`}
-        {fixtures.length > 0 && `, ${fixtures.length.toString()} fixture${fixtures.length !== 1 ? 's' : ''}`}
-      </div>
-
-      {/* Scrollable student list */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {realStudents.map((s) => (
-          <div key={s.id} style={itemStyle}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {s.name}
-            </span>
-            {s.preferences.length > 0 && (
-              <span
-                style={{
-                  flexShrink: 0,
-                  marginLeft: 4,
-                  fontSize: '0.68rem',
-                  color: '#888',
-                  background: '#f0f0f0',
-                  borderRadius: 3,
-                  padding: '1px 4px',
-                }}
-                title={`${s.preferences.length.toString()} preference(s)`}
-              >
-                {s.preferences.length}p
-              </span>
-            )}
-          </div>
-        ))}
-
-        {fixtures.length > 0 && (
-          <>
-            <div
-              style={{
-                padding: '4px 8px 2px',
-                fontSize: '0.68rem',
-                color: '#999',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                borderTop: '1px solid #eee',
-                marginTop: 4,
-              }}
-            >
-              Fixtures
-            </div>
-            {fixtures.map((s) => (
-              <div key={s.id} style={{ ...itemStyle, color: '#9c27b0', fontStyle: 'italic' }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {s.name}
-                </span>
-              </div>
-            ))}
-          </>
-        )}
-      </div>
-
       {/* Usage hint */}
       <div
         style={{
-          padding: '6px 8px',
+          padding: '4px 8px',
           fontSize: '0.68rem',
           color: '#aaa',
           lineHeight: 1.4,
           borderTop: '1px solid #eee',
         }}
       >
-        Drag students between desks.
-        <br />
-        Right-click to lock / preview neighbors.
+        Click to select. Drag to a desk. Right-click to lock.
       </div>
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// Context menu (inline — no external dialog lib)
+// Context menu component (inline)
 // ---------------------------------------------------------------------------
 
 const StudentContextMenu: React.FC<{
+  menuRef: React.RefObject<HTMLDivElement>;
   menu: ContextMenuState;
   locks: ReadonlySet<FurnitureId>;
   onLock: (fid: FurnitureId) => void;
   onUnlock: (fid: FurnitureId) => void;
   onClose: () => void;
-}> = ({ menu, locks, onLock, onUnlock, onClose }) => {
+}> = ({ menuRef, menu, locks, onLock, onUnlock, onClose }) => {
   const isLocked = locks.has(menu.fid);
 
   return (
     <>
-      {/* Backdrop to close the menu */}
       <div
         style={{ position: 'fixed', inset: 0, zIndex: 999 }}
-        onClick={onClose}
         onContextMenu={(e) => { e.preventDefault(); onClose(); }}
       />
       <div
+        ref={menuRef}
         style={{
           position: 'fixed',
           left: menu.x,
@@ -804,7 +1508,6 @@ const StudentContextMenu: React.FC<{
           userSelect: 'none',
         }}
       >
-        {/* Header — student name */}
         <div
           style={{
             padding: '6px 12px',
@@ -816,14 +1519,12 @@ const StudentContextMenu: React.FC<{
           {menu.studentName}
         </div>
 
-        {/* Neighbor count info */}
         <div style={{ padding: '4px 12px', color: '#888', fontSize: '0.76rem' }}>
           {menu.neighborCount} neighboring desk{menu.neighborCount !== 1 ? 's' : ''}
         </div>
 
         <div style={{ borderTop: '1px solid #eee' }} />
 
-        {/* Lock toggle */}
         <div
           role="menuitem"
           tabIndex={0}
@@ -859,51 +1560,39 @@ const StudentContextMenu: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// StudentEditor shell — wraps the EditorMode and mounts the context menu
-// ---------------------------------------------------------------------------
-//
-// The EditorMode object itself cannot use React hooks (it's a plain object).
-// We therefore split: the EditorMode object handles all canvas interaction and
-// delegates the context menu to a React wrapper component that is rendered in
-// the SidePanel via a shared signal mechanism. Instead, we use a simpler
-// approach: the context menu is a floating React component anchored to the
-// document body, controlled via a React state lifted into the Toolbar/SidePanel
-// parent (which would be the shell in Phase 9). For Phase 8, we implement the
-// context menu inside the SidePanel component, which has access to React state,
-// and communicate from the EditorMode's onContextMenu via a module-level
-// callback that the SidePanel registers.
-
-/** Callback set by the SidePanel so onContextMenu can show the menu. */
-let showContextMenuCallback:
-  | ((state: ContextMenuState) => void)
-  | null = null;
-
-// ---------------------------------------------------------------------------
-// StudentEditorWithMenu — wrapper that provides React state for the context menu
+// StudentSidePanelWithMenu — left panel + floating context menu
 // ---------------------------------------------------------------------------
 
-/**
- * We need React state for the context menu, but EditorMode components
- * (Toolbar / SidePanel) are separate React components. We compose them in
- * the shell. To handle the context menu without Phase 9 shell involvement we
- * provide a compound SidePanel component that includes both the roster and the
- * floating context menu, using a module-level callback to bridge the canvas
- * event to React state.
- */
 const StudentSidePanelWithMenu: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const locks = ctx.store.locks;
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => { setContextMenu(null); }, []);
 
-  // Register the callback so onContextMenu can trigger the menu.
-  // useEffect with [] ensures we register once on mount and unregister on unmount,
-  // avoiding the ESLint react-hooks/globals rule against in-render module-level mutation.
-  // The stable `setContextMenu` from useState is safe to capture in the effect.
   React.useEffect(() => {
     showContextMenuCallback = setContextMenu;
+    closeContextMenuCallback = closeMenu;
     return () => {
       showContextMenuCallback = null;
+      closeContextMenuCallback = null;
     };
-  }, []);
+  }, [closeMenu]);
+
+  React.useEffect(() => {
+    if (contextMenu === null) return;
+
+    const handleWindowPointerDown = (e: PointerEvent) => {
+      if (e.target instanceof Node && menuRef.current?.contains(e.target)) {
+        return;
+      }
+      closeMenu();
+    };
+
+    window.addEventListener('pointerdown', handleWindowPointerDown, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleWindowPointerDown, { capture: true });
+    };
+  }, [contextMenu, closeMenu]);
 
   const handleLock = (fid: FurnitureId) => {
     ctx.store.lockSeat(fid);
@@ -917,14 +1606,15 @@ const StudentSidePanelWithMenu: React.FC<{ ctx: EditorContext }> = ({ ctx }) => 
 
   return (
     <>
-      <StudentSidePanel ctx={ctx} />
+      <StudentRosterPanel ctx={ctx} />
       {contextMenu !== null && (
         <StudentContextMenu
+          menuRef={menuRef}
           menu={contextMenu}
           locks={locks}
           onLock={handleLock}
           onUnlock={handleUnlock}
-          onClose={() => { setContextMenu(null); }}
+          onClose={closeMenu}
         />
       )}
     </>
@@ -932,33 +1622,415 @@ const StudentSidePanelWithMenu: React.FC<{ ctx: EditorContext }> = ({ ctx }) => 
 };
 
 // ---------------------------------------------------------------------------
-// Client-space → canvas-pixel conversion helper
-// (needed for drag ghost: pointer is in client space, canvas draws in its own space)
+// RightPanel — preferences panel for the selected student
 // ---------------------------------------------------------------------------
 
 /**
- * Given a pointer event client position and the CanvasView, return the
- * position in canvas-pixel space (same coordinate system as paintOverlay).
- * The CanvasView provides cellAt() and cellRect() which we can use to
- * reconstruct the canvas origin.
- *
- * We derive the canvas pixel position from the cell coordinates:
- *   canvasX = col * cellSize + (clientX - clientLeftOfCell)
- * But cellAt() gives us the cell; cellRect() gives us the cell's pixel rect
- * in canvas space. To get client→canvas offset we need the origin.
- *
- * Simpler approach: compute (clientX - canvasOriginX) directly. CanvasView
- * doesn't expose the origin, but we can recover it: cellAt returns a cell,
- * and the cell's pixel rect is known, so:
- *   canvasX = (clientX - originX) where originX = clientX - (cell.x * cellSize + fractional)
- * Instead, since we only need an approximate ghost position for the drag,
- * we just use the cell center in canvas space. This matches the Python
- * prototype which used the cursor position as the ghost center.
- *
- * We store the raw canvas-local pixel position by computing:
- *   x = (cell.x + 0.5) * cellSize, y = (cell.y + 0.5) * cellSize
- * This snaps the ghost to the hovered cell's center, which is visually clean.
+ * Add-preference form — extracted so we can use a React `key` to reset its
+ * internal state when the selected student changes (avoids setState-in-effect).
  */
+const AddPrefForm: React.FC<{
+  selectedStudent: Student;
+  realStudents: readonly Student[];
+  weight: number;
+  onAdd: (targetId: StudentId, weight: number) => void;
+}> = ({ selectedStudent, realStudents, weight, onAdd }) => {
+  const [addTargetId, setAddTargetId] = useState<StudentId | ''>('');
+
+  const handleAddPrefInner = () => {
+    if (addTargetId === '') return;
+    if (addTargetId === selectedStudent.id) return;
+    const targetId: StudentId = addTargetId;
+    onAdd(targetId, weight);
+    setAddTargetId('');
+  };
+
+  return (
+    <div
+      style={{
+        padding: '8px 10px',
+        borderTop: '1px solid #e3f2fd',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 5,
+      }}
+    >
+      <div style={{ fontSize: '0.72rem', color: '#555', fontWeight: 600 }}>
+        Add preference:
+      </div>
+      <select
+        value={addTargetId}
+        onChange={(e) => { setAddTargetId(e.target.value as StudentId | ''); }}
+        style={{
+          fontSize: '0.74rem',
+          padding: '2px 4px',
+          borderRadius: 3,
+          border: '1px solid #bbb',
+        }}
+      >
+        <option value="">— target student —</option>
+        {realStudents
+          .filter((st) => st.id !== selectedStudent.id)
+          .map((st) => (
+            <option key={st.id} value={st.id}>
+              {st.name}
+            </option>
+          ))}
+      </select>
+      <button
+        type="button"
+        onClick={handleAddPrefInner}
+        disabled={addTargetId === ''}
+        style={{
+          padding: '3px 8px',
+          borderRadius: 3,
+          border: '1px solid #90caf9',
+          background: addTargetId === '' ? '#eee' : '#e3f2fd',
+          color: '#1565c0',
+          cursor: addTargetId === '' ? 'default' : 'pointer',
+          fontSize: '0.74rem',
+          fontWeight: 600,
+        }}
+      >
+        Add
+      </button>
+    </div>
+  );
+};
+
+const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
+  const roster = ctx.store.roster;
+  const selectedStudentId = ctx.store.selectedStudentId;
+
+  const [assignerOn, setAssignerOn] = useState(false);
+  const [showLinksOn, setShowLinksOn] = useState(false);
+  const [weight, setWeight] = useState(-1.0);
+
+  // Keep module-level vars in sync with React state
+  React.useEffect(() => {
+    assignerModeActive = assignerOn;
+    // Reset marker state when turning assigner mode off
+    if (!assignerOn) {
+      markerFirstFid = null;
+      markerFirstStudent = null;
+      // §13.6: stop the pulse loop and clear the toolbar hint
+      stopPulseLoop();
+      if (setAssignerFirstStudentCallback !== null) {
+        setAssignerFirstStudentCallback(null);
+      }
+    }
+    ctx.canvas.requestRepaint();
+  }, [assignerOn, ctx.canvas]);
+
+  React.useEffect(() => {
+    showLinks = showLinksOn;
+    ctx.canvas.requestRepaint();
+  }, [showLinksOn, ctx.canvas]);
+
+  React.useEffect(() => {
+    currentWeight = weight;
+  }, [weight]);
+
+  // Register the assigner-mode toggle callback so canvas events can read it
+  React.useEffect(() => {
+    setAssignerModeCallback = setAssignerOn;
+    return () => {
+      setAssignerModeCallback = null;
+    };
+  }, []);
+
+  const realStudents = roster.filter((s) => !s.isFixture);
+  const nameMap = new Map<StudentId, string>(roster.map((s) => [s.id, s.name]));
+
+  const selectedStudent =
+    selectedStudentId !== null ? roster.find((s) => s.id === selectedStudentId) ?? null : null;
+
+  const handleToggleAssigner = () => {
+    setAssignerOn((prev) => !prev);
+  };
+
+  const handleToggleLinks = () => {
+    setShowLinksOn((prev) => !prev);
+  };
+
+  const handleWeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v)) {
+      setWeight(v);
+      currentWeight = v;
+    }
+  };
+
+  const handleRemovePref = (pref: Preference) => {
+    if (selectedStudentId === null) return;
+    if (pref.kind === 'location') return;
+    if (pref.kind === 'furniture') {
+      ctx.store.removePreference(selectedStudentId, pref.targetId);
+      ctx.canvas.requestRepaint();
+      return;
+    }
+    // student-kind: enforce mutual removal
+    ctx.store.clearMutualPreference(selectedStudentId, pref.targetId);
+    ctx.canvas.requestRepaint();
+  };
+
+  const handleAddPref = (targetId: StudentId, w: number) => {
+    if (selectedStudentId === null) return;
+    ctx.store.setMutualPreference(selectedStudentId, targetId, w);
+    ctx.canvas.requestRepaint();
+  };
+
+  const btn: React.CSSProperties = {
+    padding: '4px 10px',
+    borderRadius: 4,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: '#bbb',
+    background: '#fff',
+    cursor: 'pointer',
+    fontSize: '0.8rem',
+    whiteSpace: 'nowrap',
+  };
+  const btnToggled: React.CSSProperties = {
+    ...btn,
+    background: '#1565c0',
+    color: '#fff',
+    borderColor: '#1565c0',
+  };
+  const btnOrange: React.CSSProperties = {
+    ...btn,
+    background: '#e65100',
+    color: '#fff',
+    borderColor: '#e65100',
+  };
+
+  const prefRowStyle: React.CSSProperties = {
+    padding: '3px 8px',
+    borderBottom: '1px solid #f0f0f0',
+    fontSize: '0.75rem',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  };
+
+  return (
+    <div
+      style={{
+        width: 220,
+        minWidth: 190,
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#fafafa',
+        borderLeft: '1px solid #ddd',
+        overflowY: 'hidden',
+        height: '100%',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: '8px 10px 4px',
+          fontWeight: 700,
+          fontSize: '0.78rem',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          color: '#555',
+          borderBottom: '1px solid #ddd',
+        }}
+      >
+        Preferences
+      </div>
+
+      {/* Assigner mode toggle — top of panel */}
+      <div
+        style={{
+          padding: '8px 10px',
+          borderBottom: '1px solid #eee',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleToggleAssigner}
+          style={assignerOn ? btnOrange : btn}
+          title={
+            assignerOn
+              ? 'Assigner mode ON — click two students to link them. ESC to cancel.'
+              : 'Enable assigner mode to link students by clicking them on the canvas'
+          }
+        >
+          {assignerOn ? '🖱 Assigner ON' : 'Enable Assigner'}
+        </button>
+
+        {assignerOn && (
+          <div style={{ fontSize: '0.72rem', color: '#666', fontStyle: 'italic', lineHeight: 1.4 }}>
+            Click a student, then another to link. ESC to cancel.
+          </div>
+        )}
+
+        {/* Weight control (shown in assigner mode for context; always useful) */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.78rem' }}>
+          <span style={{ color: '#555' }}>Weight:</span>
+          <input
+            type="number"
+            step="0.5"
+            value={weight}
+            onChange={handleWeightChange}
+            style={{
+              width: 62,
+              padding: '2px 4px',
+              borderRadius: 3,
+              border: '1px solid #bbb',
+              fontSize: '0.78rem',
+            }}
+            title="Negative = avoid, positive = prefer"
+          />
+          <span
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 600,
+              color: weight < 0 ? '#c62828' : '#2e7d32',
+            }}
+          >
+            {weight < 0 ? 'Avoid' : weight > 0 ? 'Prefer' : 'Neutral'}
+          </span>
+        </label>
+
+        {/* Show links toggle */}
+        <button
+          type="button"
+          onClick={handleToggleLinks}
+          style={showLinksOn ? btnToggled : btn}
+          title="Draw preference links between currently seated students"
+        >
+          {showLinksOn ? 'Links ON' : 'Show Links'}
+        </button>
+      </div>
+
+      {/* Selected student preference detail */}
+      {selectedStudent === null ? (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            fontSize: '0.78rem',
+            color: '#aaa',
+            textAlign: 'center',
+            lineHeight: 1.5,
+          }}
+        >
+          Click a student in the roster to see their preferences.
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {/* Selected student header */}
+          <div
+            style={{
+              padding: '6px 10px',
+              fontWeight: 700,
+              fontSize: '0.82rem',
+              color: '#1565c0',
+              borderBottom: '1px solid #eee',
+              background: '#e3f2fd',
+            }}
+          >
+            {selectedStudent.name}
+          </div>
+
+          {/* Preference list */}
+          {selectedStudent.preferences.length === 0 ? (
+            <div style={{ padding: '8px 10px', fontSize: '0.74rem', color: '#aaa' }}>
+              No preferences set.
+            </div>
+          ) : (
+            selectedStudent.preferences.map((pref, idx) => {
+              let targetLabel: string;
+              if (pref.kind === 'student') {
+                targetLabel = nameMap.get(pref.targetId) ?? pref.targetId;
+              } else if (pref.kind === 'furniture') {
+                targetLabel = `Furniture: ${pref.targetId}`;
+              } else {
+                targetLabel = `Location: ${pref.target}`;
+              }
+              const dirLabel = pref.weight > 0 ? '↑ Prefer' : '↓ Avoid';
+              const dirColor = pref.weight > 0 ? '#2e7d32' : '#c62828';
+              return (
+                <div
+                  // eslint-disable-next-line react/no-array-index-key
+                  key={idx}
+                  style={prefRowStyle}
+                >
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: dirColor, fontWeight: 700 }}>{dirLabel}</span>
+                    {' '}
+                    {targetLabel}
+                    <span style={{ color: '#aaa', marginLeft: 3 }}>
+                      ({pref.weight > 0 ? '+' : ''}{pref.weight.toFixed(1)})
+                    </span>
+                  </span>
+                  {pref.kind !== 'location' && (
+                    <button
+                      type="button"
+                      onClick={() => { handleRemovePref(pref); }}
+                      style={{
+                        flexShrink: 0,
+                        marginLeft: 4,
+                        padding: '1px 5px',
+                        fontSize: '0.68rem',
+                        border: '1px solid #ffcdd2',
+                        borderRadius: 3,
+                        background: '#ffebee',
+                        color: '#c62828',
+                        cursor: 'pointer',
+                      }}
+                      title="Remove this preference"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
+
+          {/* Add preference form — keyed on selectedStudentId so React resets
+               its internal dropdown state whenever the selection changes,
+               avoiding the need for a setState-in-effect reset. */}
+          <AddPrefForm
+            key={selectedStudentId ?? ''}
+            selectedStudent={selectedStudent}
+            realStudents={realStudents}
+            weight={weight}
+            onAdd={handleAddPref}
+          />
+        </div>
+      )}
+
+      {/* Usage hint */}
+      <div
+        style={{
+          padding: '6px 8px',
+          fontSize: '0.68rem',
+          color: '#aaa',
+          lineHeight: 1.4,
+          borderTop: '1px solid #eee',
+        }}
+      >
+        Select a student, then use Assigner or the Add form.
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Pointer / canvas helpers
+// ---------------------------------------------------------------------------
+
 function clientToCanvasPixel(
   clientX: number,
   clientY: number,
@@ -972,19 +2044,12 @@ function clientToCanvasPixel(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Find furniture under pointer (returns furniture with a real occupant, not fixture)
-// ---------------------------------------------------------------------------
-
 function findDraggableFurnitureAt(
   cell: { x: number; y: number },
   furniture: readonly Furniture[],
 ): Furniture | null {
-  // Use furnitureAt from the canvas (last match wins — topmost in paint order)
-  // We replicate the logic here since we have access to furniture directly.
   let found: Furniture | null = null;
   for (const f of furniture) {
-    // Check if cell is within f's bounding box
     if (
       cell.x >= f.pos.x &&
       cell.x < f.pos.x + f.w &&
@@ -1007,19 +2072,29 @@ export const StudentEditor: EditorMode = {
 
   Toolbar: StudentToolbar,
   SidePanel: StudentSidePanelWithMenu,
+  RightPanel: StudentPreferencesPanel,
 
   // ---- Lifecycle -----------------------------------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  activate(_ctx: EditorContext): void {
-    // Reset all transient state
+  activate(ctx: EditorContext): void {
     dragSourceFid = null;
     dragStudent = null;
     dragCanvasPos = null;
     dragHoverFid = null;
     neighborPreviewFid = null;
+    markerFirstFid = null;
+    markerFirstStudent = null;
+    // §13.7 — clear roster-drag hover state on activate
+    rosterDragHoverFid = null;
+    clearDraggedStudentIdStash();
+    // Reset mode flags so they match the RightPanel's fresh React state on re-mount.
+    // (deactivate also resets these, but activate is the definitive guard against
+    // any edge-case where deactivate didn't run cleanly before a re-activate.)
+    assignerModeActive = false;
+    showLinks = false;
+    // Wire the pulse repaint fn from the incoming context.
+    pulseRepaintFn = () => { ctx.canvas.requestRepaint(); };
     clearGraphCache();
-    // Keep showViolations and nearness across activations (editor-local settings persist within session)
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1029,45 +2104,118 @@ export const StudentEditor: EditorMode = {
     dragCanvasPos = null;
     dragHoverFid = null;
     neighborPreviewFid = null;
+    markerFirstFid = null;
+    markerFirstStudent = null;
+    assignerModeActive = false;
+    // §13.7 — clear roster-drag state on deactivate
+    rosterDragHoverFid = null;
+    clearDraggedStudentIdStash();
+    // §13.6: stop the pulse loop on deactivate — no leak to next editor
+    stopPulseLoop();
+    pulseRepaintFn = null;
+    // Reset showLinks so it matches the RightPanel's fresh useState(false) on re-mount.
+    // Without this, toggling showLinks ON then switching editors and back would leave
+    // the overlay rendering but the toggle button showing the wrong state.
+    showLinks = false;
+    // Notify the React component to reset its toggle state
+    if (setAssignerModeCallback !== null) {
+      setAssignerModeCallback(false);
+    }
+    // §13.6: clear the toolbar hint
+    if (setAssignerFirstStudentCallback !== null) {
+      setAssignerFirstStudentCallback(null);
+    }
+    if (closeContextMenuCallback !== null) {
+      closeContextMenuCallback();
+    }
     showContextMenuCallback = null;
+    closeContextMenuCallback = null;
     clearGraphCache();
   },
 
-  // ---- Pointer events — drag-between-desks ---------------------------------
+  // ---- Pointer events — routes to drag or assigner mode --------------------
 
   onPointerDown(e: PointerEvent, ctx: EditorContext): void {
     if (e.button !== 0) return;
 
+    // Dismiss any open context menu on any left-click on the canvas.
+    if (closeContextMenuCallback !== null) {
+      closeContextMenuCallback();
+    }
+
     const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
     if (cell === undefined) return;
 
-    const furniture = findDraggableFurnitureAt(cell, ctx.store.classroom.furniture);
-    if (furniture === null) return;
+    if (assignerModeActive) {
+      // ---- Assigner (marker) mode flow ------------------------------------
+      const f = findDraggableFurnitureAt(cell, ctx.store.classroom.furniture);
+      if (f === null) return;
 
-    const occ = occupant(furniture);
-    // Skip empty desks and fixtures
-    if (occ === undefined || occ.isFixture) return;
+      const occ = occupant(f);
+      if (occ === undefined || occ.isFixture) return;
+      if (isFurnitureFixture(f) || capacity(f) === 0) return;
 
-    dragSourceFid = furniture.id;
-    dragStudent = occ;
-    dragCanvasPos = clientToCanvasPixel(e.clientX, e.clientY, ctx.canvas) ?? dragCanvasPos;
-    dragHoverFid = furniture.id;
+      if (markerFirstFid === null) {
+        // Step 1: select first student — push name into toolbar hint (§13.6)
+        markerFirstFid = f.id;
+        markerFirstStudent = occ;
+        // Notify the React hint component
+        if (setAssignerFirstStudentCallback !== null) {
+          setAssignerFirstStudentCallback(occ.name);
+        }
+        // §13.6: start the pulse loop so the amber ring animates at ~60fps
+        startPulseLoop();
+        ctx.canvas.requestRepaint();
+      } else {
+        if (f.id === markerFirstFid) {
+          // Self-target: no-op, keep selection
+          return;
+        }
+        // Step 2: create mutual preference — clear the hint
+        const student1 = markerFirstStudent;
+        const student2 = occ;
 
-    ctx.canvas.requestRepaint();
+        if (student1 !== null) {
+          ctx.store.setMutualPreference(student1.id, student2.id, currentWeight);
+        }
+
+        markerFirstFid = null;
+        markerFirstStudent = null;
+        // §13.6: stop the pulse loop — markerFirstFid is now null
+        stopPulseLoop();
+        // Clear the toolbar hint
+        if (setAssignerFirstStudentCallback !== null) {
+          setAssignerFirstStudentCallback(null);
+        }
+        ctx.canvas.requestRepaint();
+      }
+    } else {
+      // ---- Drag mode flow ------------------------------------------------
+      const furniture = findDraggableFurnitureAt(cell, ctx.store.classroom.furniture);
+      if (furniture === null) return;
+
+      const occ = occupant(furniture);
+      if (occ === undefined || occ.isFixture) return;
+
+      dragSourceFid = furniture.id;
+      dragStudent = occ;
+      dragCanvasPos = clientToCanvasPixel(e.clientX, e.clientY, ctx.canvas) ?? dragCanvasPos;
+      dragHoverFid = furniture.id;
+
+      ctx.canvas.requestRepaint();
+    }
   },
 
   onPointerMove(e: PointerEvent, ctx: EditorContext): void {
+    if (assignerModeActive) return; // no drag in assigner mode
     if (dragSourceFid === null) return;
 
-    // Update ghost position
     const pos = clientToCanvasPixel(e.clientX, e.clientY, ctx.canvas);
     if (pos !== null) dragCanvasPos = pos;
 
-    // Find hover target
     const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
     if (cell !== undefined) {
       const f = findDraggableFurnitureAt(cell, ctx.store.classroom.furniture);
-      // Allow hovering over: occupied non-fixture desks (swap) OR empty assignable desks (move)
       if (f !== null && !isFurnitureFixture(f) && capacity(f) > 0) {
         dragHoverFid = f.id;
       } else {
@@ -1082,11 +2230,10 @@ export const StudentEditor: EditorMode = {
 
   onPointerUp(e: PointerEvent, ctx: EditorContext): void {
     if (e.button !== 0) return;
+    if (assignerModeActive) return;
     if (dragSourceFid === null || dragStudent === null) return;
 
     const sourceFid = dragSourceFid;
-
-    // Reset drag state before committing so any repaint shows clean state
     dragSourceFid = null;
     dragStudent = null;
     dragCanvasPos = null;
@@ -1095,15 +2242,7 @@ export const StudentEditor: EditorMode = {
     dragHoverFid = null;
 
     if (targetFid !== null && targetFid !== sourceFid) {
-      // manualReassign handles swap/move + fixture preservation + history push
-      ctx.store.manualReassign(
-        sourceFid,
-        targetFid,
-      );
-      // Note: the prototype clears locks on both desks after a manual drag.
-      // Our store's manualReassign does NOT clear locks automatically (locks are
-      // a separate durable-project concern). We clear them here to match the
-      // prototype's behavior.
+      ctx.store.manualReassign(sourceFid, targetFid);
       if (ctx.store.locks.has(sourceFid)) ctx.store.unlockSeat(sourceFid);
       if (ctx.store.locks.has(targetFid)) ctx.store.unlockSeat(targetFid);
       clearGraphCache();
@@ -1112,19 +2251,102 @@ export const StudentEditor: EditorMode = {
     ctx.canvas.requestRepaint();
   },
 
-  // ---- Keyboard ------------------------------------------------------------
+  // ---- Keyboard — ESC cancels assigner selection ---------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onKeyDown(_e: KeyboardEvent, _ctx: EditorContext): void {
-    // Escape could clear neighbor preview — keeping minimal for Phase 8
+  onKeyDown(e: KeyboardEvent, ctx: EditorContext): void {
+    if (e.key !== 'Escape') return;
+    if (assignerModeActive && markerFirstFid !== null) {
+      markerFirstFid = null;
+      markerFirstStudent = null;
+      // §13.6: stop the pulse loop and clear the toolbar hint on ESC
+      stopPulseLoop();
+      if (setAssignerFirstStudentCallback !== null) {
+        setAssignerFirstStudentCallback(null);
+      }
+      ctx.canvas.requestRepaint();
+    }
   },
 
-  // ---- Drop — not used in StudentEditor (roster drags are pointer events) --
+  // ---- Drop (§13.7 — roster-drag onto a desk) ------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onDrop(_e: DragEvent, _ctx: EditorContext): void {
-    // No HTML5 drag-and-drop from the roster panel in this phase.
-    // Drag-between-desks uses pointer events only.
+  onDrop(e: DragEvent, ctx: EditorContext): void {
+    e.preventDefault();
+
+    // Always clear the stash and the hover highlight on drop
+    clearDraggedStudentIdStash();
+    rosterDragHoverFid = null;
+    ctx.canvas.requestRepaint();
+
+    // Read the dragged studentId
+    const sid = readDraggedStudentId(e);
+    if (sid === null) return;
+
+    // Map the drop point to a grid cell → furniture
+    const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
+    if (cell === undefined) return;
+
+    const targetF = ctx.canvas.furnitureAt(cell);
+    if (targetF === undefined) return;
+
+    // Guard: must be an assignable, non-fixture desk
+    if (capacity(targetF) === 0) return;
+    if (isFurnitureFixture(targetF)) return;
+
+    // Dispatch store action — handles move / swap / seat-from-unseated,
+    // pushes history, clears locks, calls syncRosterToClassroom.
+    ctx.store.assignStudentToFurniture(sid, targetF.id);
+
+    // §13.7 — invalidate the SeatGraph cache so violations/neighbors refresh.
+    clearGraphCache();
+
+    ctx.canvas.requestRepaint();
+  },
+
+  // ---- DragOver (§13.7 — live drop-target highlight during roster-drag) ---
+
+  onDragOver(e: DragEvent, ctx: EditorContext): void {
+    // Read the dragged student id — if not a roster drag, ignore
+    const sid = readDraggedStudentId(e);
+    if (sid === null) {
+      if (rosterDragHoverFid !== null) {
+        rosterDragHoverFid = null;
+        ctx.canvas.requestRepaint();
+      }
+      return;
+    }
+
+    e.preventDefault(); // accept the drop
+    if (e.dataTransfer !== null) e.dataTransfer.dropEffect = 'move';
+
+    const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
+    if (cell === undefined) {
+      if (rosterDragHoverFid !== null) {
+        rosterDragHoverFid = null;
+        ctx.canvas.requestRepaint();
+      }
+      return;
+    }
+
+    const targetF = ctx.canvas.furnitureAt(cell);
+    const newHover =
+      targetF !== undefined && capacity(targetF) > 0 && !isFurnitureFixture(targetF)
+        ? targetF.id
+        : null;
+
+    if (newHover !== rosterDragHoverFid) {
+      rosterDragHoverFid = newHover;
+      ctx.canvas.requestRepaint();
+    }
+  },
+
+  // ---- DragEnd (§13.7 — clean up hover state if drag was cancelled) -------
+
+  onDragEnd(_e: DragEvent, ctx: EditorContext): void {
+    clearDraggedStudentIdStash();
+    if (rosterDragHoverFid !== null) {
+      rosterDragHoverFid = null;
+      ctx.canvas.requestRepaint();
+    }
   },
 
   // ---- Context menu — toggle lock + neighbor preview ----------------------
@@ -1134,7 +2356,6 @@ export const StudentEditor: EditorMode = {
 
     const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
 
-    // Right-click anywhere without a furniture: clear neighbor preview
     if (cell === undefined) {
       if (neighborPreviewFid !== null) {
         neighborPreviewFid = null;
@@ -1145,7 +2366,6 @@ export const StudentEditor: EditorMode = {
 
     const furniture = findDraggableFurnitureAt(cell, ctx.store.classroom.furniture);
     if (furniture === null) {
-      // Empty cell: clear neighbor preview
       if (neighborPreviewFid !== null) {
         neighborPreviewFid = null;
         ctx.canvas.requestRepaint();
@@ -1155,7 +2375,6 @@ export const StudentEditor: EditorMode = {
 
     const fid = furniture.id;
 
-    // Toggle neighbor preview (works for any desk, occupied or not, fixture or not)
     if (neighborPreviewFid === fid) {
       neighborPreviewFid = null;
     } else {
@@ -1163,11 +2382,11 @@ export const StudentEditor: EditorMode = {
     }
     ctx.canvas.requestRepaint();
 
-    // Only show context menu for occupied, non-fixture desks
     const occ = occupant(furniture);
     if (occ === undefined || occ.isFixture) return;
 
-    const graph = getSeatGraph(ctx.store.classroom, nearness);
+    // §13.4: use classroom.thresholdUnits (single source of truth)
+    const graph = getSeatGraph(ctx.store.classroom, ctx.store.classroom.thresholdUnits);
     const neighborCount = graph.neighbors(fid).length;
 
     if (showContextMenuCallback !== null) {
@@ -1185,12 +2404,14 @@ export const StudentEditor: EditorMode = {
   // ---- paintOverlay --------------------------------------------------------
 
   paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
-    // EditorMode.paintOverlay only receives ctx2d + view (not EditorContext).
-    // We need classroom + locks from the store. Since this is a Zustand singleton
-    // we read via getState() — the same pattern used by FurnitureEditor for
-    // selectedRect (which reads module-level state set by pointer handlers).
-    // getState() is synchronous and always returns the current state snapshot.
     const state = usePijonStore.getState();
-    paintOverlay(ctx2d, view, state.classroom, state.locks);
+    paintStudentOverlay(
+      ctx2d,
+      view,
+      state.classroom,
+      state.locks,
+      state.showViolations,           // §13.5: from store, default true
+      state.classroom.thresholdUnits, // §13.4: classroom's single source of truth
+    );
   },
 };

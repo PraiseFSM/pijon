@@ -34,7 +34,7 @@
  * LOCAL-FIRST: no fetch(), no XHR, no WebSocket. All writes go through the Zustand store.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureKind, Vec2 } from '../../domain/types.js';
 import { furnitureId } from '../../domain/types.js';
@@ -42,6 +42,28 @@ import type { Furniture } from '../../domain/furniture.js';
 import { occupiedCells } from '../../domain/furniture.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
 import { makeClassroom } from '../../domain/classroom.js';
+import type { GridEdge } from '../../domain/classroom.js';
+
+// ---------------------------------------------------------------------------
+// §13.1 — Transparent 1×1 image for suppressing the HTML5 drag ghost
+// ---------------------------------------------------------------------------
+
+/**
+ * A tiny transparent canvas used as a replacement drag image so the browser
+ * shows nothing when the teacher starts dragging from the palette.
+ * Created lazily once on first use; reused thereafter.
+ */
+let _transparentDragImage: HTMLCanvasElement | null = null;
+
+function getTransparentDragImage(): HTMLCanvasElement {
+  if (_transparentDragImage === null) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    _transparentDragImage = canvas;
+  }
+  return _transparentDragImage;
+}
 
 // ---------------------------------------------------------------------------
 // Furniture kind metadata — drives both the palette and the factory
@@ -87,7 +109,40 @@ function makeFurniture(kind: FurnitureKind, pos: Vec2): Furniture {
 // dataTransfer key for palette drag
 // ---------------------------------------------------------------------------
 
-const DRAG_KIND_KEY = 'application/x-pijon-furniture-kind';
+export const DRAG_KIND_KEY = 'application/x-pijon-furniture-kind';
+
+// ---------------------------------------------------------------------------
+// §13.1 — Cross-browser dragstart kind stash
+//
+// Firefox and Safari both return "" from dataTransfer.getData() during a
+// dragover event (the HTML5 spec deliberately restricts data access to drop
+// events in some browsers). To paint a live preview we stash the dragged kind
+// in a module-level variable on dragstart and clear it on dragend/drop.
+// onDragOver reads this variable when getData() returns empty.
+// ---------------------------------------------------------------------------
+
+let _draggedKindStash = '';
+
+/** Called by the palette's onDragStart to stash the kind for cross-browser dragover. */
+export function stashDraggedKind(kind: string): void {
+  _draggedKindStash = kind;
+}
+
+/** Clear the stash on dragend or drop so it never bleeds to a later drag. */
+export function clearDraggedKindStash(): void {
+  _draggedKindStash = '';
+}
+
+/**
+ * Read the dragged furniture kind, falling back to the module-level stash when
+ * dataTransfer.getData() returns "" (Firefox/Safari during dragover).
+ */
+export function readDraggedKind(e: DragEvent): string {
+  let kind = e.dataTransfer?.getData(DRAG_KIND_KEY) ?? '';
+  if (!kind) kind = e.dataTransfer?.getData('text/plain') ?? '';
+  if (!kind) kind = _draggedKindStash; // Firefox/Safari dragover fallback
+  return kind;
+}
 
 // ---------------------------------------------------------------------------
 // Collision helper (port of classroom_builder.py check_collision)
@@ -165,38 +220,58 @@ let dropCollisionFlash = false;
 let repaintFn: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
+// §13.1 — Palette drag-over preview (live canvas preview while dragging from palette)
+// ---------------------------------------------------------------------------
+
+/**
+ * When the teacher drags a palette item over the grid (HTML5 dragover), we paint
+ * a live preview of the to-be-placed furniture at the hovered cell.
+ * Cleared on dragend / drop / dragleave.
+ */
+let paletteDragPreview: {
+  kind: FurnitureKind;
+  previewPos: Vec2;
+  /** True = fits (no collision, in bounds); False = red warning. */
+  valid: boolean;
+} | null = null;
+
+// ---------------------------------------------------------------------------
 // Toolbar component
 // ---------------------------------------------------------------------------
 
 /**
  * Toolbar for FurnitureEditor.
- * Accepts an optional `onSave` / `onLoad` so Phase 9 can pass PersistenceHandle callbacks.
- * Without them, Save/Load log a console.warn informing Phase 9 wiring is needed.
+ *
+ * Contains:
+ *  - New / Clear / Save / Load project controls.
+ *  - Grid resize section: +/- buttons at each edge (top, bottom, left, right).
+ *  - Grid granularity control: integer input to set cellsPerUnit.
+ *
+ * A warning banner appears when a resize is blocked (furniture in the way).
  */
 const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
+  const warning = ctx.store.resizeGridWarning;
+  const classroom = ctx.store.classroom;
+  const [granularityInput, setGranularityInput] = useState(classroom.cellsPerUnit);
+
   const handleNew = () => {
-    // ctx.store is the full PijonState & PijonActions snapshot;
-    // read classroom dims from it directly (no .getState() needed here).
     const fresh = makeClassroom(
       crypto.randomUUID(),
       'My Classroom',
-      ctx.store.classroom.gridW,
-      ctx.store.classroom.gridH,
+      classroom.gridW,
+      classroom.gridH,
     );
     ctx.store.setClassroom(fresh);
   };
 
   const handleClear = () => {
-    // Remove all furniture one by one (store tracks locks cleanup per piece).
-    // Snapshot the array first so iteration is stable as pieces are removed.
-    const furniture = [...ctx.store.classroom.furniture];
+    const furniture = [...classroom.furniture];
     for (const f of furniture) {
       ctx.store.removeFurniture(f.id);
     }
   };
 
   const handleSave = () => {
-    // Use persistence handle from EditorContext (wired by Phase 9 shell).
     if (ctx.persistence === null) {
       console.warn('[FurnitureEditor] Persistence not yet available.');
       return;
@@ -205,7 +280,6 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   };
 
   const handleLoad = () => {
-    // Use persistence handle from EditorContext (wired by Phase 9 shell).
     if (ctx.persistence === null) {
       console.warn('[FurnitureEditor] Persistence not yet available.');
       return;
@@ -213,40 +287,200 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     void ctx.persistence.openFromFile();
   };
 
-  const btnStyle: React.CSSProperties = {
-    padding: '4px 12px',
-    marginRight: 6,
+  const handleResize = (edge: GridEdge, delta: number) => {
+    ctx.store.resizeGrid(edge, delta);
+    ctx.canvas.requestRepaint();
+  };
+
+  const handleGranularityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseInt(e.target.value, 10);
+    if (!Number.isFinite(v) || v < 1) return;
+    setGranularityInput(v);
+  };
+
+  const handleGranularityApply = () => {
+    if (granularityInput === classroom.cellsPerUnit) return;
+    try {
+      ctx.store.setGranularity(granularityInput);
+      ctx.canvas.requestRepaint();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      setGranularityInput(classroom.cellsPerUnit);
+    }
+  };
+
+  const handleGranularityKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleGranularityApply();
+  };
+
+  const btn: React.CSSProperties = {
+    padding: '3px 9px',
     borderRadius: 4,
     border: '1px solid #bbb',
     background: '#fff',
     cursor: 'pointer',
-    fontSize: '0.85rem',
+    fontSize: '0.82rem',
+    lineHeight: '1.4',
   };
+
+  const btnSm: React.CSSProperties = {
+    ...btn,
+    padding: '2px 7px',
+    fontWeight: 700,
+    minWidth: 24,
+  };
+
+  const sep = (
+    <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px', display: 'inline-block' }} />
+  );
 
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: '6px 10px',
+        flexDirection: 'column',
         background: '#f5f5f5',
         borderBottom: '1px solid #ddd',
       }}
     >
-      <span style={{ fontWeight: 600, marginRight: 10, fontSize: '0.9rem' }}>Furniture</span>
-      <button style={btnStyle} onClick={handleNew} type="button">
-        New
-      </button>
-      <button style={btnStyle} onClick={handleClear} type="button">
-        Clear
-      </button>
-      <button style={btnStyle} onClick={handleSave} type="button" title="Save classroom to a .pijon file">
-        Save…
-      </button>
-      <button style={btnStyle} onClick={handleLoad} type="button" title="Open a .pijon file">
-        Load…
-      </button>
+      {/* Warning banner */}
+      {warning !== null && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '4px 10px',
+            background: '#fff3e0',
+            borderBottom: '1px solid #ffe0b2',
+            fontSize: '0.78rem',
+            color: '#e65100',
+          }}
+        >
+          <span style={{ flex: 1 }}>⚠ {warning}</span>
+          <button
+            type="button"
+            onClick={() => { ctx.store.dismissResizeWarning(); }}
+            style={{ ...btn, padding: '1px 7px', fontSize: '0.74rem', color: '#e65100', borderColor: '#ffb74d' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Main toolbar row */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 4,
+          padding: '5px 10px',
+        }}
+      >
+        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: '#333' }}>Furniture</span>
+        <button style={btn} onClick={handleNew} type="button">New</button>
+        <button style={btn} onClick={handleClear} type="button">Clear</button>
+        <button style={btn} onClick={handleSave} type="button" title="Save classroom to a .pijon file">Save…</button>
+        <button style={btn} onClick={handleLoad} type="button" title="Open a .pijon file">Load…</button>
+
+        {sep}
+
+        {/* Grid resize controls */}
+        <span style={{ fontSize: '0.78rem', color: '#555', fontWeight: 600 }}>Grid:</span>
+
+        {/* Top/Bottom rows */}
+        <span style={{ fontSize: '0.72rem', color: '#888' }}>Rows</span>
+        <button
+          style={btnSm}
+          type="button"
+          title="Add a row at the top (shifts furniture down)"
+          onClick={() => { handleResize('top', 1); }}
+        >+T</button>
+        <button
+          style={btnSm}
+          type="button"
+          title="Remove a row from the top"
+          onClick={() => { handleResize('top', -1); }}
+        >−T</button>
+        <button
+          style={btnSm}
+          type="button"
+          title="Add a row at the bottom"
+          onClick={() => { handleResize('bottom', 1); }}
+        >+B</button>
+        <button
+          style={btnSm}
+          type="button"
+          title="Remove a row from the bottom"
+          onClick={() => { handleResize('bottom', -1); }}
+        >−B</button>
+
+        {/* Left/Right cols */}
+        <span style={{ fontSize: '0.72rem', color: '#888', marginLeft: 4 }}>Cols</span>
+        <button
+          style={btnSm}
+          type="button"
+          title="Add a column at the left (shifts furniture right)"
+          onClick={() => { handleResize('left', 1); }}
+        >+L</button>
+        <button
+          style={btnSm}
+          type="button"
+          title="Remove a column from the left"
+          onClick={() => { handleResize('left', -1); }}
+        >−L</button>
+        <button
+          style={btnSm}
+          type="button"
+          title="Add a column at the right"
+          onClick={() => { handleResize('right', 1); }}
+        >+R</button>
+        <button
+          style={btnSm}
+          type="button"
+          title="Remove a column from the right"
+          onClick={() => { handleResize('right', -1); }}
+        >−R</button>
+
+        {/* Grid size readout */}
+        <span style={{ fontSize: '0.72rem', color: '#777', marginLeft: 4 }}>
+          ({classroom.gridW}×{classroom.gridH})
+        </span>
+
+        {sep}
+
+        {/* Granularity */}
+        <span style={{ fontSize: '0.78rem', color: '#555', fontWeight: 600 }}>Granularity:</span>
+        <input
+          type="number"
+          min="1"
+          max="16"
+          step="1"
+          value={granularityInput}
+          onChange={handleGranularityChange}
+          onBlur={handleGranularityApply}
+          onKeyDown={handleGranularityKeyDown}
+          style={{
+            width: 46,
+            padding: '2px 4px',
+            borderRadius: 4,
+            border: '1px solid #bbb',
+            fontSize: '0.8rem',
+            textAlign: 'center',
+          }}
+          title={`Fine cells per unit (current: ${classroom.cellsPerUnit.toString()}). Changing scales furniture positions/sizes so physical layout is unchanged.`}
+        />
+        <button
+          type="button"
+          style={{ ...btn, fontSize: '0.78rem' }}
+          onClick={handleGranularityApply}
+          title="Apply granularity change"
+          disabled={granularityInput === classroom.cellsPerUnit}
+        >
+          Apply
+        </button>
+      </div>
     </div>
   );
 };
@@ -262,6 +496,15 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
     e.dataTransfer.setData(DRAG_KIND_KEY, kind);
     // Also set text/plain as a fallback (some browsers strip custom MIME types)
     e.dataTransfer.setData('text/plain', kind);
+
+    // §13.1 — Stash the kind in a module-level variable so onDragOver can read
+    // it in Firefox/Safari, where getData() returns "" during dragover (spec restriction).
+    stashDraggedKind(kind);
+
+    // §13.1 — Suppress the browser's default HTML5 drag-image (the furniture PNG ghost).
+    // Replace it with a transparent 1px canvas so the teacher sees only our live
+    // canvas preview painted in onDragOver, not a faded snapshot of the palette item.
+    e.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
   };
 
   const itemStyle: React.CSSProperties = {
@@ -340,6 +583,48 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
 };
 
 // ---------------------------------------------------------------------------
+// §13.1 — Furniture fill-colour helpers (mirror render.ts so the live preview
+// looks identical to the base-pass furniture)
+// ---------------------------------------------------------------------------
+
+/** Fill colour for each furniture kind — must mirror render.ts COLORS. */
+function kindFillColor(kind: FurnitureKind): string {
+  switch (kind) {
+    case 'single_desk':   return '#e3f2fd';
+    case 'table':         return '#e8f5e9';
+    case 'teacher_desk':  return '#fff3e0';
+    case 'whiteboard':    return '#f3e5f5';
+  }
+}
+
+/** Stroke colour — mirrors render.ts strokeForFurniture logic. */
+function kindStrokeColor(kind: FurnitureKind): string {
+  if (kind === 'teacher_desk' || kind === 'whiteboard') return '#b39ddb';
+  return '#90a4ae';
+}
+
+/**
+ * Draw the furniture kind as a filled+stroked rectangle at pixel rect r.
+ * This is the same visual as the base render pass so the preview is
+ * indistinguishable from placed furniture.
+ */
+function paintFurnitureRect(
+  ctx2d: CanvasRenderingContext2D,
+  kind: FurnitureKind,
+  r: { x: number; y: number; w: number; h: number },
+  alpha = 1.0,
+): void {
+  ctx2d.save();
+  ctx2d.globalAlpha = alpha;
+  ctx2d.fillStyle = kindFillColor(kind);
+  ctx2d.fillRect(r.x, r.y, r.w, r.h);
+  ctx2d.strokeStyle = kindStrokeColor(kind);
+  ctx2d.lineWidth = 1.5;
+  ctx2d.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  ctx2d.restore();
+}
+
+// ---------------------------------------------------------------------------
 // paintOverlay
 // ---------------------------------------------------------------------------
 
@@ -362,7 +647,7 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
     ctx2d.setLineDash([]);
   }
 
-  // --- Drag preview ---
+  // --- §13.1 Drag preview — real-time furniture (not a ghost outline) ---
   if (dragState !== null) {
     const { furniture: f, previewPos, valid } = dragState;
     const r = {
@@ -372,17 +657,62 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
       h: f.h * view.cellSize,
     };
 
+    // Ghost/dim the original spot so the teacher can see it was moved
+    const origR = {
+      x: f.pos.x * view.cellSize,
+      y: f.pos.y * view.cellSize,
+      w: f.w * view.cellSize,
+      h: f.h * view.cellSize,
+    };
+    if (origR.x !== r.x || origR.y !== r.y) {
+      // Draw the original position faded out to show the "source"
+      ctx2d.fillStyle = 'rgba(240, 240, 240, 0.65)';
+      ctx2d.fillRect(origR.x, origR.y, origR.w, origR.h);
+    }
+
+    // Draw actual furniture at the preview position
+    paintFurnitureRect(ctx2d, f.kind, r);
+
+    // Validity tint — overlay to signal valid/invalid drop position
     if (valid) {
-      ctx2d.fillStyle = 'rgba(25, 118, 210, 0.18)';
-      ctx2d.fillRect(r.x, r.y, r.w, r.h);
       ctx2d.strokeStyle = 'rgba(25, 118, 210, 0.9)';
-      ctx2d.lineWidth = 2;
+      ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     } else {
-      ctx2d.fillStyle = 'rgba(211, 47, 47, 0.18)';
+      ctx2d.fillStyle = 'rgba(211, 47, 47, 0.30)';
       ctx2d.fillRect(r.x, r.y, r.w, r.h);
-      ctx2d.strokeStyle = 'rgba(211, 47, 47, 0.8)';
-      ctx2d.lineWidth = 2;
+      ctx2d.strokeStyle = 'rgba(211, 47, 47, 0.9)';
+      ctx2d.lineWidth = 2.5;
+      ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    }
+  }
+
+  // --- §13.1 Palette drag-over live preview ---
+  if (paletteDragPreview !== null) {
+    const { kind, previewPos, valid } = paletteDragPreview;
+    const meta = PALETTE_ITEMS.find((m) => m.kind === kind);
+    const w = meta?.w ?? 1;
+    const h = meta?.h ?? 1;
+    const r = {
+      x: previewPos.x * view.cellSize,
+      y: previewPos.y * view.cellSize,
+      w: w * view.cellSize,
+      h: h * view.cellSize,
+    };
+
+    // Draw real furniture at drag position
+    paintFurnitureRect(ctx2d, kind, r, 0.85);
+
+    // Validity tint
+    if (valid) {
+      ctx2d.strokeStyle = 'rgba(25, 118, 210, 0.85)';
+      ctx2d.lineWidth = 2.5;
+      ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    } else {
+      ctx2d.fillStyle = 'rgba(211, 47, 47, 0.28)';
+      ctx2d.fillRect(r.x, r.y, r.w, r.h);
+      ctx2d.strokeStyle = 'rgba(211, 47, 47, 0.85)';
+      ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
   }
@@ -431,6 +761,7 @@ export const FurnitureEditor: EditorMode = {
     selectedRect = null;
     dragState = null;
     dropCollisionFlash = false;
+    paletteDragPreview = null;
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -439,6 +770,10 @@ export const FurnitureEditor: EditorMode = {
     selectedRect = null;
     dragState = null;
     dropCollisionFlash = false;
+    paletteDragPreview = null;
+    // Clear the cross-browser drag kind stash — important if the teacher switches
+    // editors mid-drag (unlikely but guards against any stale state).
+    clearDraggedKindStash();
     repaintFn = null;
   },
 
@@ -568,7 +903,12 @@ export const FurnitureEditor: EditorMode = {
   onDrop(e: DragEvent, ctx: EditorContext): void {
     e.preventDefault();
 
-    // Read the furniture kind from dataTransfer
+    // §13.1 — Clear the live preview immediately on drop
+    paletteDragPreview = null;
+    // Clear the cross-browser stash — this drag is over
+    clearDraggedKindStash();
+
+    // Read the furniture kind from dataTransfer (drop event always allows getData)
     let kind = e.dataTransfer?.getData(DRAG_KIND_KEY) ?? '';
     if (!kind) {
       kind = e.dataTransfer?.getData('text/plain') ?? '';
@@ -620,6 +960,64 @@ export const FurnitureEditor: EditorMode = {
       h: meta.h * ctx.canvas.cellSize,
     };
     ctx.canvas.requestRepaint();
+  },
+
+  // ---- §13.1 dragover — live palette preview on the canvas ------------------
+
+  onDragOver(e: DragEvent, ctx: EditorContext): void {
+    // Read the furniture kind — falls back to the module-level stash in Firefox/Safari
+    // where getData() returns "" during dragover (see readDraggedKind).
+    const kind = readDraggedKind(e);
+
+    const validKinds: readonly string[] = ['single_desk', 'table', 'teacher_desk', 'whiteboard'];
+    if (!validKinds.includes(kind)) {
+      // Not a furniture drag — clear any stale preview and bail
+      if (paletteDragPreview !== null) {
+        paletteDragPreview = null;
+        ctx.canvas.requestRepaint();
+      }
+      return;
+    }
+
+    const furnitureKind = kind as FurnitureKind;
+    const meta = PALETTE_ITEMS.find((m) => m.kind === furnitureKind);
+    if (meta === undefined) return;
+
+    const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
+    if (cell === undefined) {
+      if (paletteDragPreview !== null) {
+        paletteDragPreview = null;
+        ctx.canvas.requestRepaint();
+      }
+      return;
+    }
+
+    const valid =
+      inBounds(cell, meta.w, meta.h, ctx.store.classroom.gridW, ctx.store.classroom.gridH) &&
+      !hasCollision(cell, meta.w, meta.h, ctx.store.classroom.furniture);
+
+    // Update preview only if it changed (avoid unnecessary repaints)
+    const prev = paletteDragPreview;
+    const changed =
+      prev?.kind !== furnitureKind ||
+      prev.previewPos.x !== cell.x ||
+      prev.previewPos.y !== cell.y ||
+      prev.valid !== valid;
+    if (changed) {
+      paletteDragPreview = { kind: furnitureKind, previewPos: cell, valid };
+      ctx.canvas.requestRepaint();
+    }
+  },
+
+  // ---- §13.1 dragend — clear palette preview on drag end -------------------
+
+  onDragEnd(_e: DragEvent, ctx: EditorContext): void {
+    // Clear the cross-browser stash so it never bleeds to a later drag.
+    clearDraggedKindStash();
+    if (paletteDragPreview !== null) {
+      paletteDragPreview = null;
+      ctx.canvas.requestRepaint();
+    }
   },
 
   // ---- Context menu — no-op for now ----------------------------------------

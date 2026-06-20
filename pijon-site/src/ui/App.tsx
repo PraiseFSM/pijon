@@ -1,18 +1,18 @@
 /**
- * App.tsx — Phase 9 shell.
+ * App.tsx — Phase 9 shell (updated §12.4 for right panel).
  *
  * Layout (from PROJECT_OUTLINE § "The Experience"):
  *
- *   ┌──────────────────────────────────────────────────────┐
- *   │  [ Furniture ] [ Students ]     ← EditorSwitcher     │
- *   ├──────────────────────────────────────────────────────┤
- *   │  tool-specific Toolbar + "saved locally" + Erase all │  TopBar
- *   ├──────────────┬───────────────────────────────────────┤
- *   │  tool-       │                                        │
- *   │  specific    │        the classroom grid              │
- *   │  SidePanel   │        (single ClassroomCanvas,        │
- *   │  (swaps)     │         never unmounted)               │
- *   └──────────────┴───────────────────────────────────────┘
+ *   ┌──────────────────────────────────────────────────────────────────┐
+ *   │  [ Furniture ] [ Students ]          ← EditorSwitcher            │
+ *   ├──────────────────────────────────────────────────────────────────┤
+ *   │  tool-specific Toolbar + "saved locally" + Erase all             │  TopBar
+ *   ├──────────────┬──────────────────────────────────┬────────────────┤
+ *   │  tool-       │                                  │ tool-specific   │
+ *   │  specific    │        the classroom grid        │ RightPanel      │
+ *   │  SidePanel   │        (single ClassroomCanvas,  │ (optional, swaps│
+ *   │  (swaps)     │         never unmounted)         │  with editor)   │
+ *   └──────────────┴──────────────────────────────────┴────────────────┘
  *
  * Grid persistence guarantee:
  *   ONE <ClassroomCanvas> instance remains mounted for the entire app lifetime.
@@ -45,6 +45,7 @@ import { EDITOR_REGISTRY } from './editors/registry.js';
 import { EditorSwitcher } from './shell/EditorSwitcher.js';
 import { TopBar } from './shell/TopBar.js';
 import { SidePanel } from './shell/SidePanel.js';
+import { RightPanel } from './shell/RightPanel.js';
 
 // ---------------------------------------------------------------------------
 // Minimal no-op CanvasView — used before the canvas mounts and fires onViewReady.
@@ -198,6 +199,9 @@ export default function App() {
             />
           </div>
         </div>
+
+        {/* Right panel — optional, present only for editors that define RightPanel */}
+        <RightPanel activeEditor={activeEditor} ctx={editorCtx} />
       </div>
     </div>
   );

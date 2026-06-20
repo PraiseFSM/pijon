@@ -35,16 +35,23 @@
 
 import { create } from 'zustand';
 import type { FurnitureId, Vec2, StudentId } from '../domain/types.js';
-import { furnitureId } from '../domain/types.js';
+import { furnitureId, studentId } from '../domain/types.js';
 import type { Student } from '../domain/student.js';
 import {
+  makeStudent,
   addPreference as studentAddPreference,
   removePreferencesFor,
 } from '../domain/student.js';
 import type { Preference } from '../domain/preference.js';
+import {
+  setMutualPreference as prefSetMutual,
+  clearMutualPreference as prefClearMutual,
+  pruneOrphanStudentPrefs,
+} from '../domain/preference.js';
 import type { Furniture } from '../domain/furniture.js';
-import { assignOccupant, vacate } from '../domain/furniture.js';
+import { assignOccupant, vacate, capacity, isFixture } from '../domain/furniture.js';
 import type { Classroom } from '../domain/classroom.js';
+import type { GridEdge } from '../domain/classroom.js';
 import {
   makeClassroom,
   addFurniture as domainAddFurniture,
@@ -53,6 +60,10 @@ import {
   updateFurniture,
   furnitureById,
   assignments,
+  syncRosterToClassroom,
+  resizeGrid as domainResizeGrid,
+  setGranularity as domainSetGranularity,
+  setThreshold as domainSetThreshold,
 } from '../domain/classroom.js';
 import { SeatGraph } from '../domain/seatGraph.js';
 import type { Allocator } from '../domain/allocators/types.js';
@@ -115,6 +126,35 @@ export interface PijonState {
    * (browser without FSA, or no file chosen yet).
    */
   fileHandle: FileSystemFileHandle | null;
+
+  /**
+   * The student currently selected in the StudentEditor left-panel roster.
+   * Null when no student is selected. UI state only — not persisted.
+   * Drives the right-panel preferences view.
+   */
+  selectedStudentId: StudentId | null;
+
+  /**
+   * When the most recent resizeGrid() call was blocked, this holds the reason
+   * string so the UI can surface a warning toast. Null otherwise.
+   * Cleared when any subsequent resizeGrid() succeeds or when explicitly dismissed.
+   */
+  resizeGridWarning: string | null;
+
+  /**
+   * Whether to render the violation overlay (red tint on desks where avoid-prefs
+   * are violated). Lives in the store so the setting survives editor switches
+   * within a session (§13.5). Defaults to true — violations are shown on first
+   * load and after eraseAll().
+   *
+   * This is app-level UI state (NOT per-project and NOT in the .pijon file):
+   * the same flag applies regardless of which class is open, matching the
+   * teacher UX intent that "show violations" is a display preference, not a
+   * classroom setting. It resets to true on every page reload (EMPTY_STATE).
+   * If future work needs cross-session persistence, add it to IndexedDB as
+   * app-level config — do NOT put it in the project file.
+   */
+  showViolations: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +245,35 @@ export interface PijonActions {
    */
   manualReassign(fromFid: FurnitureId, toFid: FurnitureId): void;
 
+  /**
+   * Seat a roster student (by id) at a given furniture (by id).
+   * §13.7 — roster-drag → canvas-drop action.
+   *
+   * Semantics (immutable; pushes history; marks dirty; clears locks on affected desks):
+   *   - If the target is a fixture or has capacity 0 → no-op (returns silently).
+   *   - If the student is already at the target desk → no-op.
+   *   - If the student is seated elsewhere:
+   *       • Vacate their old desk.
+   *       • If the target desk is occupied by another real student (swap candidate):
+   *           – Place the swap candidate on the now-vacated old desk.
+   *       • Place the dragged student on the target desk.
+   *   - If the student is unseated:
+   *       • If the target desk is occupied by another real student:
+   *           – Vacate the target desk (displaced student becomes unseated).
+   *       • Place the dragged student on the target desk.
+   *   - Calls syncRosterToClassroom so occupant copies are fresh after the move.
+   *   - Clears locks on the old desk (if any) and the target desk (if any),
+   *     consistent with manualReassign.
+   *
+   * No-ops (returns without changing state):
+   *   - studentId not in roster
+   *   - furnitureId not in classroom
+   *   - target furniture is a fixture (capacity === 0 and has a fixture occupant)
+   *     or is a non-assignable kind (capacity === 0)
+   *   - student is already at the target desk
+   */
+  assignStudentToFurniture(sid: StudentId, fid: FurnitureId): void;
+
   // -- Undo / redo --
 
   /** Step back one arrangement in history (if possible). */
@@ -232,6 +301,10 @@ export interface PijonActions {
    * Append a preference to a roster student. Marks dirty so autosave persists.
    * Immutable: replaces the student record in `roster` without mutating it.
    * Does nothing when the studentId is not found in the roster.
+   *
+   * For student↔student preferences prefer `setMutualPreference` which
+   * enforces symmetry. This low-level action is kept for furniture/location
+   * preferences that are intentionally one-sided.
    */
   addPreference(studentId: StudentId, pref: Preference): void;
 
@@ -239,9 +312,68 @@ export interface PijonActions {
    * Remove all preferences from a roster student that target `targetId`.
    * Immutable: replaces the student record in `roster` without mutating it.
    * Does nothing when the studentId is not found in the roster.
-   * Uses `removePreferencesFor` from student.ts (pure helper).
+   *
+   * For student↔student preferences prefer `clearMutualPreference` which
+   * removes both sides atomically.
    */
   removePreference(studentId: StudentId, targetId: string): void;
+
+  /**
+   * Set a symmetric student↔student preference between aId and bId with the
+   * given weight. Both students get a 'student'-kind preference targeting the
+   * other at the same weight. If a preference between the pair already exists
+   * it is replaced (not duplicated). Self-targeting (aId === bId) is a no-op.
+   *
+   * This is the ONLY correct way to write student↔student preferences —
+   * routing through here guarantees the mutual invariant is never violated.
+   */
+  setMutualPreference(aId: StudentId, bId: StudentId, weight: number): void;
+
+  /**
+   * Remove any student-kind preference between aId and bId from BOTH students.
+   * Furniture/location prefs are unaffected. Self-targeting is a no-op.
+   */
+  clearMutualPreference(aId: StudentId, bId: StudentId): void;
+
+  // -- Grid resize and granularity --
+
+  /**
+   * Add or remove rows/columns at the given edge.
+   * On success, updates the classroom and marks dirty.
+   * On failure (furniture in the way), sets `resizeGridWarning` and leaves
+   * the classroom unchanged.
+   */
+  resizeGrid(edge: GridEdge, delta: number): void;
+
+  /**
+   * Change the grid granularity (cellsPerUnit) to `newG`.
+   * Scales all furniture positions + sizes and gridW/gridH so the physical
+   * layout is unchanged. The proximity threshold stays in units.
+   * Marks dirty on success.
+   * Throws if newG is invalid or if scaling produces non-integer results.
+   */
+  setGranularity(newG: number): void;
+
+  /**
+   * Dismiss the current resizeGridWarning (set it back to null).
+   * The UI calls this when the user acknowledges the toast.
+   */
+  dismissResizeWarning(): void;
+
+  /**
+   * Update the classroom's proximity threshold to `units`.
+   * Updates classroom.thresholdUnits (single source of truth) and marks dirty.
+   * Immutable: produces a new Classroom via the domain setThreshold helper.
+   * All SeatGraph construction uses this value so allocate, violations, and
+   * neighbor preview stay consistent.
+   */
+  setThreshold(units: number): void;
+
+  /**
+   * Toggle or explicitly set the violation-overlay visibility.
+   * This is app-level UI state (not per-project) that defaults to true (§13.5).
+   */
+  setShowViolations(on: boolean): void;
 
   // -- Erase --
 
@@ -250,6 +382,33 @@ export interface PijonActions {
    * persistence.ts must also delete the IndexedDB record separately.
    */
   eraseAll(): void;
+
+  // -- UI selection --
+
+  /**
+   * Set the selected student id (drives the right-panel preferences view in
+   * the StudentEditor). Pass null to deselect.
+   */
+  setSelectedStudentId(id: StudentId | null): void;
+
+  // -- Manual roster management --
+
+  /**
+   * Add a new student by name. Mints a fresh StudentId via crypto.randomUUID(),
+   * appends to the roster, marks dirty, and syncs the classroom (seats are still
+   * empty — no auto-assign). No-op if name is blank after trimming.
+   */
+  addStudent(name: string): void;
+
+  /**
+   * Remove a student from the roster by id. Pruning steps (§12.5 helpers):
+   *   1. Remove the student from the roster.
+   *   2. pruneOrphanStudentPrefs removes dangling mutual prefs from other students.
+   *   3. syncRosterToClassroom vacates their seat (if occupied) and syncs occupants.
+   *   4. Clears selectedStudentId if it was this student.
+   * Marks dirty.
+   */
+  removeStudent(studentId: StudentId): void;
 }
 
 export type PijonStore = PijonState & PijonActions;
@@ -274,6 +433,10 @@ const EMPTY_STATE: PijonState = {
   saveStatus: 'saved',
   activeEditorId: null,
   fileHandle: null,
+  selectedStudentId: null,
+  resizeGridWarning: null,
+  // §13.5: violations are ON by default — teachers see constraint feedback immediately.
+  showViolations: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -396,8 +559,12 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
       // Merge: keep existing students not duplicated by id
       const existingIds = new Set(s.roster.map((st) => st.id));
       const newStudents = students.filter((st) => !existingIds.has(st.id));
+      const newRoster = [...s.roster, ...newStudents];
       return {
-        roster: [...s.roster, ...newStudents],
+        roster: newRoster,
+        // Sync classroom so any already-seated students get fresh copies and
+        // any students removed from the roster have their seats vacated.
+        classroom: syncRosterToClassroom(s.classroom, newRoster),
         saveStatus: 'dirty',
       };
     });
@@ -406,14 +573,28 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
   },
 
   setRoster(roster: readonly Student[]) {
-    set({ roster, saveStatus: 'dirty' });
+    set((s) => {
+      // Prune student-kind prefs whose target is no longer in the new roster
+      // (handles the case where the caller removed one or more students).
+      const pruned = pruneOrphanStudentPrefs(roster);
+      return {
+        roster: pruned,
+        // Sync classroom so occupant copies stay in step with the new roster
+        // (seats of removed students are vacated by syncRosterToClassroom).
+        classroom: syncRosterToClassroom(s.classroom, pruned),
+        saveStatus: 'dirty',
+      };
+    });
   },
 
   // ---- Seating -------------------------------------------------------------
 
   allocate(allocator: Allocator) {
     const s = get();
-    const graph = new SeatGraph(s.classroom);
+    // §13.4 / §12.3 bug fix: build SeatGraph with the classroom's thresholdUnits
+    // so allocate and smartShuffle use the same nearness as the violation overlay
+    // and neighbor preview. The DEFAULT was used before (§12.3 residual risk).
+    const graph = new SeatGraph(s.classroom, s.classroom.thresholdUnits);
 
     // Pre-populate with locked occupants
     for (const fid of s.locks) {
@@ -532,6 +713,106 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
     });
   },
 
+  // ---- §13.7 — Assign student from roster to a furniture (roster-drag drop) ----
+
+  assignStudentToFurniture(sid: StudentId, fid: FurnitureId) {
+    set((s) => {
+      const classroom = s.classroom;
+
+      // Guard: student must be in roster
+      const student = s.roster.find((st) => st.id === sid);
+      if (student === undefined) return {};
+
+      // Guard: fixture students (faux room-feature stand-ins) must never be seated
+      // at a real desk — they belong to teacher_desk / whiteboard via the fixture
+      // mechanism. The UI already prevents dragging them, but defend here too.
+      if (student.isFixture) return {};
+
+      // Guard: furniture must exist
+      const targetF = furnitureById(classroom, fid);
+      if (targetF === undefined) return {};
+
+      // Guard: target must be assignable (capacity > 0 and not a fixture seat)
+      if (capacity(targetF) === 0) return {}; // teacher_desk / whiteboard → no-op
+      if (isFixture(targetF)) return {}; // has a fixture occupant — no-op
+
+      const targetOcc = targetF.occupants[0];
+
+      // Guard: student is already at target → no-op
+      if (targetOcc?.id === sid) return {};
+
+      // Find the student's current desk (if any)
+      const oldFid = classroom.furniture.find((f) => f.occupants[0]?.id === sid)?.id ?? null;
+
+      let updated = classroom;
+
+      // Step 1: vacate old desk (if student was seated)
+      if (oldFid !== null) {
+        const oldF = furnitureById(updated, oldFid);
+        if (oldF !== undefined) {
+          updated = updateFurniture(updated, oldFid, vacate(oldF));
+        }
+      }
+
+      // Step 2: if target has a real occupant (swap candidate), move them to old desk
+      if (targetOcc !== undefined && !targetOcc.isFixture) {
+        if (oldFid !== null) {
+          // Swap: displaced student goes to the old desk.
+          // The old desk was just vacated in Step 1, so assignOccupant must succeed for a
+          // real student on a capacity-1 desk. We still guard with try/catch so that an
+          // unexpected throw (e.g. from a future capacity change) aborts cleanly instead of
+          // silently swallowing the error and leaving the displaced student in limbo.
+          // If this branch throws, we bail out of the whole action — returning {} leaves the
+          // classroom unchanged rather than putting a student into an inconsistent state.
+          const vacatedOld = furnitureById(updated, oldFid);
+          if (vacatedOld === undefined) return {};
+          try {
+            updated = updateFurniture(updated, oldFid, assignOccupant(vacatedOld, targetOcc));
+          } catch {
+            // The freshly-vacated old desk refused the swap candidate — cannot complete the
+            // swap without losing a student. Abort the whole action (return {} = no change).
+            return {};
+          }
+          // Vacate the target of its current occupant before we assign the dragged student
+          const freshTarget = furnitureById(updated, fid);
+          if (freshTarget !== undefined) {
+            const tOcc = freshTarget.occupants[0];
+            if (tOcc !== undefined && !tOcc.isFixture) {
+              updated = updateFurniture(updated, fid, vacate(freshTarget));
+            }
+          }
+        } else {
+          // Unseated student: just vacate the target (displaced student becomes unseated)
+          const freshTarget = furnitureById(updated, fid);
+          if (freshTarget !== undefined) {
+            updated = updateFurniture(updated, fid, vacate(freshTarget));
+          }
+        }
+      }
+
+      // Step 3: assign the dragged student to the target desk
+      const readyTarget = furnitureById(updated, fid);
+      if (readyTarget === undefined) return {};
+      try {
+        updated = updateFurniture(updated, fid, assignOccupant(readyTarget, student));
+      } catch {
+        // Shouldn't happen for a properly vacated, capacity>0 desk — bail
+        return {};
+      }
+
+      // Step 4: sync occupant copies so preferences/names are fresh
+      updated = syncRosterToClassroom(updated, s.roster);
+
+      // Step 5: clear locks on affected desks (consistent with manualReassign)
+      const newLocks = new Set(s.locks);
+      newLocks.delete(fid);
+      if (oldFid !== null) newLocks.delete(oldFid);
+
+      const hist = pushHistory({ history: s.history, historyPtr: s.historyPtr }, updated);
+      return { classroom: updated, locks: newLocks, ...hist, saveStatus: 'dirty' };
+    });
+  },
+
   // ---- Undo / redo ---------------------------------------------------------
 
   undo() {
@@ -540,7 +821,14 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
       const newPtr = s.historyPtr - 1;
       const snapshot = s.history[newPtr];
       if (snapshot === undefined) return {};
-      return { classroom: snapshot, historyPtr: newPtr, saveStatus: 'dirty' };
+      // Sync the restored snapshot with the CURRENT roster so occupant copies
+      // reflect the latest names and preferences — the snapshot was taken before
+      // any subsequent roster edits, so its embedded copies may be stale.
+      return {
+        classroom: syncRosterToClassroom(snapshot, s.roster),
+        historyPtr: newPtr,
+        saveStatus: 'dirty',
+      };
     });
   },
 
@@ -550,7 +838,12 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
       const newPtr = s.historyPtr + 1;
       const snapshot = s.history[newPtr];
       if (snapshot === undefined) return {};
-      return { classroom: snapshot, historyPtr: newPtr, saveStatus: 'dirty' };
+      // Same sync-on-restore pattern as undo — snapshots may be pre-roster-edit.
+      return {
+        classroom: syncRosterToClassroom(snapshot, s.roster),
+        historyPtr: newPtr,
+        saveStatus: 'dirty',
+      };
     });
   },
 
@@ -572,30 +865,115 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
 
   // ---- Preferences ---------------------------------------------------------
 
-  addPreference(studentId: StudentId, pref: Preference) {
+  addPreference(sid: StudentId, pref: Preference) {
     set((s) => {
-      const idx = s.roster.findIndex((st) => st.id === studentId);
+      // Guard: student-kind prefs must go through setMutualPreference to enforce
+      // the mutual invariant. Also block self-targeting at this level.
+      if (pref.kind === 'student' && pref.targetId === sid) return {};
+      const idx = s.roster.findIndex((st) => st.id === sid);
       if (idx === -1) return {};
       const existing = s.roster[idx];
       if (existing === undefined) return {};
       const updated = studentAddPreference(existing, pref);
       const newRoster = [...s.roster];
       newRoster[idx] = updated;
-      return { roster: newRoster, saveStatus: 'dirty' };
+      return {
+        roster: newRoster,
+        classroom: syncRosterToClassroom(s.classroom, newRoster),
+        saveStatus: 'dirty',
+      };
     });
   },
 
-  removePreference(studentId: StudentId, targetId: string) {
+  removePreference(sid: StudentId, targetId: string) {
     set((s) => {
-      const idx = s.roster.findIndex((st) => st.id === studentId);
+      const idx = s.roster.findIndex((st) => st.id === sid);
       if (idx === -1) return {};
       const existing = s.roster[idx];
       if (existing === undefined) return {};
       const updated = removePreferencesFor(existing, targetId);
       const newRoster = [...s.roster];
       newRoster[idx] = updated;
-      return { roster: newRoster, saveStatus: 'dirty' };
+      return {
+        roster: newRoster,
+        classroom: syncRosterToClassroom(s.classroom, newRoster),
+        saveStatus: 'dirty',
+      };
     });
+  },
+
+  setMutualPreference(aId: StudentId, bId: StudentId, weight: number) {
+    set((s) => {
+      const newRoster = prefSetMutual(s.roster, aId, bId, weight);
+      // Short-circuit: if roster didn't change (self-target, neither id in roster),
+      // avoid touching classroom or triggering autosave.
+      if (newRoster === s.roster) return {};
+      return {
+        roster: newRoster,
+        classroom: syncRosterToClassroom(s.classroom, newRoster),
+        saveStatus: 'dirty',
+      };
+    });
+  },
+
+  clearMutualPreference(aId: StudentId, bId: StudentId) {
+    set((s) => {
+      const newRoster = prefClearMutual(s.roster, aId, bId);
+      if (newRoster === s.roster) return {};
+      return {
+        roster: newRoster,
+        classroom: syncRosterToClassroom(s.classroom, newRoster),
+        saveStatus: 'dirty',
+      };
+    });
+  },
+
+  // ---- Grid resize and granularity ----------------------------------------
+
+  resizeGrid(edge: GridEdge, delta: number) {
+    set((s) => {
+      const result = domainResizeGrid(s.classroom, edge, delta);
+      if (!result.ok) {
+        return { resizeGridWarning: result.reason };
+      }
+      return {
+        classroom: result.classroom,
+        resizeGridWarning: null,
+        saveStatus: 'dirty' as const,
+      };
+    });
+  },
+
+  setGranularity(newG: number) {
+    set((s) => {
+      const newClassroom = domainSetGranularity(s.classroom, newG);
+      return {
+        classroom: newClassroom,
+        saveStatus: 'dirty' as const,
+      };
+    });
+  },
+
+  dismissResizeWarning() {
+    set({ resizeGridWarning: null });
+  },
+
+  // ---- Threshold (§13.4) ---------------------------------------------------
+
+  setThreshold(units: number) {
+    // Guard here as well as in the domain helper so that an errant direct
+    // caller never throws from inside a Zustand set() callback (uncaught).
+    if (!Number.isFinite(units) || units <= 0) return;
+    set((s) => ({
+      classroom: domainSetThreshold(s.classroom, units),
+      saveStatus: 'dirty' as const,
+    }));
+  },
+
+  // ---- Show violations (§13.5) --------------------------------------------
+
+  setShowViolations(on: boolean) {
+    set({ showViolations: on });
   },
 
   // ---- Erase ---------------------------------------------------------------
@@ -606,6 +984,68 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
       // Fresh classroom id so any leftover IndexedDB key won't match
       classroom: makeClassroom(crypto.randomUUID(), 'My Classroom', 10, 8),
       saveStatus: 'saved',
+      showViolations: true,
+    });
+  },
+
+  // ---- UI selection --------------------------------------------------------
+
+  setSelectedStudentId(id: StudentId | null) {
+    set({ selectedStudentId: id });
+  },
+
+  // ---- Manual roster management -------------------------------------------
+
+  addStudent(name: string) {
+    const trimmed = name.trim();
+    if (trimmed === '') return;
+    const newStudent = makeStudent(studentId(crypto.randomUUID()), trimmed);
+    set((s) => {
+      const newRoster = [...s.roster, newStudent];
+      return {
+        roster: newRoster,
+        classroom: syncRosterToClassroom(s.classroom, newRoster),
+        saveStatus: 'dirty',
+      };
+    });
+  },
+
+  removeStudent(sid: StudentId) {
+    set((s) => {
+      // 1. Remove the student from the roster.
+      const withoutStudent = s.roster.filter((st) => st.id !== sid);
+      // No-op if student wasn't in the roster.
+      if (withoutStudent.length === s.roster.length) return {};
+
+      // 2. Prune orphan student-kind prefs from remaining students (§12.5 helper).
+      const pruned = pruneOrphanStudentPrefs(withoutStudent);
+
+      // 3. Sync classroom — vacates the removed student's seat and refreshes
+      //    occupant copies for all remaining students.
+      const newClassroom = syncRosterToClassroom(s.classroom, pruned);
+
+      // 4. Clear selectedStudentId if it was this student.
+      const newSelectedId = s.selectedStudentId === sid ? null : s.selectedStudentId;
+
+      // 5. Clear any lock on the furniture that held the removed student.
+      //    After syncRosterToClassroom the seat is empty, but the lock Set still
+      //    references the fid — a dangling lock would block allocators from using
+      //    that desk even though nobody is pinned there.
+      const removedFid = s.classroom.furniture.find(
+        (f) => f.occupants[0]?.id === sid,
+      )?.id;
+      const newLocks =
+        removedFid !== undefined && s.locks.has(removedFid)
+          ? new Set([...s.locks].filter((id) => id !== removedFid))
+          : s.locks;
+
+      return {
+        roster: pruned,
+        classroom: newClassroom,
+        locks: newLocks,
+        selectedStudentId: newSelectedId,
+        saveStatus: 'dirty',
+      };
     });
   },
 }));
@@ -620,6 +1060,43 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
  */
 export function selectArrangement(s: PijonState): Map<FurnitureId, Student> {
   return assignments(s.classroom);
+}
+
+// ---------------------------------------------------------------------------
+// §13.8 — Seating validation selector
+// ---------------------------------------------------------------------------
+
+import { validateSeating } from '../domain/validateSeating.js';
+import type { SeatingValidationResult } from '../domain/validateSeating.js';
+
+export type { SeatingValidationResult };
+export { validateSeating };
+
+/**
+ * Derive the current seating-validation result from store state.
+ * Computes `validateSeating(classroom, roster)` on demand — no redundant storage.
+ *
+ * !! DO NOT use as `usePijonStore(selectSeatingIssues)` in React components !!
+ *
+ * `SeatingValidationResult` is a freshly-allocated object every call, so
+ * Zustand v5's default reference-equality check will never see it as "unchanged"
+ * — every store tick triggers a re-render, causing an infinite render loop.
+ *
+ * Safe React pattern (already used in SeatingIssuesBanner):
+ *
+ *   // Subscribe to the stable primitives individually, then derive with useMemo.
+ *   const classroom = usePijonStore((s) => s.classroom);
+ *   const roster    = usePijonStore((s) => s.roster);
+ *   const result    = useMemo(() => validateSeating(classroom, roster), [classroom, roster]);
+ *
+ * Or call the exported `useSeatingIssues()` hook from `state/hooks.ts` which
+ * encapsulates this pattern.
+ *
+ * `selectSeatingIssues` is intentionally kept as a plain-function for tests and
+ * non-React callers that operate on a state snapshot directly.
+ */
+export function selectSeatingIssues(s: PijonState): SeatingValidationResult {
+  return validateSeating(s.classroom, s.roster);
 }
 
 // ---------------------------------------------------------------------------

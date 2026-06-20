@@ -93,10 +93,12 @@ The teacher stays in control of their data:
   preferences can refer to it. (For now, furniture holds at most one occupant.)
 - **Student** — a person to be seated, with a name and a set of **preferences**.
 - **Preference** — a student's like/dislike: "sit near X", "avoid Y", "near the window", with a
-  strength. Preferences drive the seating suggestions.
-- **Editor** — a *tool* for working on the classroom: the **Furniture editor** moves furniture, the
-  **Student editor** moves students between furniture, the **Preference editor** sets likes/dislikes.
-  More editors can be added.
+  strength. Preferences drive the seating suggestions. Preferences between two students are always
+  **mutual**: linking A to B links B to A with the same strength, and editing or removing one side
+  updates the other.
+- **Editor** — a *tool* for working on the classroom: the **Furniture editor** builds the room (and
+  resizes the grid), and the **Students editor** moves students between furniture *and* sets their
+  preferences (roster on the left, preferences on the right). More editors can be added.
 
 **Expected behavior:** move a desk and its student comes along with it; switch from the student tool
 to the furniture tool and your seating is still there.
@@ -106,19 +108,20 @@ to the furniture tool and your seating is still there.
 ## The Experience
 
 ```
- ┌───────────────────────────────────────────────────────────┐
- │  [ Furniture ] [ Students ] [ Preferences ]   ← pick a tool │   editor switcher
- ├───────────────────────────────────────────────────────────┤
- │  tool-specific toolbar (changes per editor)                 │   TOP BAR (swaps)
- ├───────────────┬───────────────────────────────────────────┤
- │ tool-specific │                                             │
- │ side panel    │            the classroom grid               │   GRID (shared, never swaps)
- │ (swaps)       │                                             │
- └───────────────┴───────────────────────────────────────────┘
+ ┌─────────────────────────────────────────────────────────────────┐
+ │  [ Furniture ] [ Students ]                    ← pick a tool       │  editor switcher
+ ├─────────────────────────────────────────────────────────────────┤
+ │  tool-specific toolbar (changes per editor)                       │  TOP BAR (swaps)
+ ├───────────────┬─────────────────────────────────┬───────────────┤
+ │ left panel    │                                 │ right panel    │
+ │ (roster /     │        the classroom grid       │ (preferences,  │  GRID (shared, never swaps)
+ │  palette)     │                                 │  when present) │
+ └───────────────┴─────────────────────────────────┴───────────────┘
 ```
 
-Switching tools swaps the **top bar** and **left bar**. The **grid stays put**, with all furniture
-and seating intact. Everything autosaves as you go.
+Switching tools swaps the **top bar** and the **side panels**. The **grid stays put**, with all
+furniture and seating intact. Everything autosaves as you go. In the Students editor the roster sits
+on the left and the selected student's preferences on the right.
 
 ---
 
@@ -130,9 +133,10 @@ specifies exactly how each template is realized in code.
 
 - **Entity template** — a domain object (Classroom, Furniture, Student, Preference). Plain data +
   pure functions; serializable; validated on load.
-- **Editor template** — a tool the user works through. Provides its own top-bar controls, side
-  panel, and how it responds to clicks/drags on the shared grid, plus any extra it draws on top.
-  *Furniture, Student, and Preference editors are all instances of this one template.*
+- **Editor template** — a tool the user works through. Provides its own top-bar controls, left
+  panel, optional right panel, and how it responds to clicks/drags on the shared grid, plus any
+  extra it draws on top. *Furniture and Students editors are instances of this template; the
+  Students editor has both a left (roster) and right (preferences) panel.*
 - **Algorithm template** — a seating allocator. Takes the roster + classroom and returns who sits
   where. New algorithms (greedy, random, annealing, …) plug in without touching the UI.
 - **Persistence template** — how state is saved/loaded: transparent autosave plus explicit
@@ -142,17 +146,26 @@ specifies exactly how each template is realized in code.
 
 ## Feature Areas
 
-**Classroom building** — resize the grid; place / move / delete furniture; furniture palette;
-(later) rotate, multi-seat tables, custom images.
+**Classroom building** — resize the grid (add / delete rows & columns); adjust grid granularity for
+finer furniture placement without changing furniture's real size; place / move / delete furniture;
+furniture palette; (later) rotate, multi-seat tables, custom images.
 
-**Roster** — import students from CSV (drag-drop or paste); edit names; add/remove students;
-export. (Later: import from a pasted spreadsheet column.)
+**Roster** — add students manually (type a name) or import from CSV (the manual add box sits just
+above the Import-CSV control, which is the last item in the roster panel); edit names; add / remove
+students; export. (Later: import from a pasted spreadsheet column.)
 
 **Seating** — auto-suggest an arrangement; drag students between desks (swap/move); lock a student
-to a desk so suggestions won't move them; show constraint violations; show a desk's neighbors.
+to a desk so suggestions won't move them; show constraint violations (on by default, kept live as
+preferences change); show a desk's neighbors.
 
-**Preferences** — set "near / avoid" between students and toward room features; quick "marker" mode
-to create them by clicking; per-student preference list.
+**Settings** (gear button in the Students editor toolbar) — a lightweight popover that houses
+low-frequency controls: the **Nearness** proximity threshold (in real units, stored per classroom so
+allocate, violations, and neighbor preview always agree) and the **Show Violations** toggle (app-level
+UI preference, defaults to on).
+
+**Preferences** (inside the Students editor, right-hand panel) — set "near / avoid" between students
+and toward room features; a toggle turns on "assigner" mode to create links by clicking two students;
+per-student preference list with weights. All student↔student preferences are mutual.
 
 **Saving & sharing** — autosave; save/open a project file the teacher controls; export an
 arrangement (and later, print / export to image or PDF).

@@ -55,7 +55,10 @@ import type { Classroom } from '../classroom.js';
 import { furnitureId, studentId } from '../types.js';
 import { makeFixture } from '../student.js';
 import { assignOccupant } from '../furniture.js';
-import { assignments, fixtures } from '../classroom.js';
+import { assignments, fixtures, DEFAULT_THRESHOLD_UNITS, DEFAULT_CELLS_PER_UNIT } from '../classroom.js';
+
+/** Current schema version — increment when the format changes. */
+export const CURRENT_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Zod schemas — single source of truth for the on-disk format
@@ -127,14 +130,25 @@ const ClassroomGeometrySchema = z.object({
   gridW: z.number().int().positive(),
   gridH: z.number().int().positive(),
   furniture: z.array(FurnitureSchema),
+  /**
+   * v2: granularity (fine cells per unit). Defaults to 1 when absent (v1 files).
+   * Stored as a positive integer ≥ 1.
+   */
+  cellsPerUnit: z.number().int().positive().default(DEFAULT_CELLS_PER_UNIT),
+  /**
+   * v2: proximity threshold in units (not raw cells). Defaults to 1.5 when absent.
+   * SeatGraph converts to cells: thresholdCells = thresholdUnits * cellsPerUnit.
+   */
+  thresholdUnits: z.number().positive().default(DEFAULT_THRESHOLD_UNITS),
 });
 
 /**
  * The full on-disk project schema.
- * Version 1 — increment for breaking migrations.
+ * Version 2 — adds cellsPerUnit and thresholdUnits to classroom geometry.
+ * Version 1 files are migrated by applyMigrations below.
  */
 const ProjectFileSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   classroom: ClassroomGeometrySchema,
   roster: z.array(StudentSchema),
   /**
@@ -180,9 +194,33 @@ export class ProjectParseError extends Error {
 // ---------------------------------------------------------------------------
 
 /**
+ * Migrate a raw v1 project file object to v2.
+ *
+ * v1 → v2 changes:
+ *   - version bumped from 1 to 2.
+ *   - classroom.cellsPerUnit added (default 1 — existing layouts used G=1).
+ *   - classroom.thresholdUnits added (default 1.5 — the only threshold ever used).
+ *
+ * All other fields are unchanged. The Zod schema `.default(...)` clauses also
+ * handle missing keys, but we set them explicitly here for clarity + test coverage.
+ */
+function migrateV1toV2(raw: Record<string, unknown>): Record<string, unknown> {
+  const classroom = (raw.classroom ?? {}) as Record<string, unknown>;
+  return {
+    ...raw,
+    version: 2,
+    classroom: {
+      ...classroom,
+      cellsPerUnit: classroom.cellsPerUnit ?? DEFAULT_CELLS_PER_UNIT,
+      thresholdUnits: classroom.thresholdUnits ?? DEFAULT_THRESHOLD_UNITS,
+    },
+  };
+}
+
+/**
  * Run any pending migrations on a raw parsed object.
- * Currently a no-op (only version 1 exists). Add cases here as the schema
- * evolves: read `raw.version`, transform, bump, repeat until current version.
+ * Add cases here as the schema evolves: read `raw.version`, transform, bump,
+ * repeat until current version.
  *
  * The pattern:
  *   if (raw.version === 1) { raw = migrateV1toV2(raw); }
@@ -190,8 +228,17 @@ export class ProjectParseError extends Error {
  *   …
  */
 function applyMigrations(raw: unknown): unknown {
-  // Future: check (raw as { version?: number }).version and transform.
-  return raw;
+  let obj = raw as Record<string, unknown>;
+
+  // v1 → v2: add cellsPerUnit + thresholdUnits
+  if (obj.version === 1) {
+    obj = migrateV1toV2(obj);
+  }
+
+  // Future migrations go here:
+  // if (obj['version'] === 2) { obj = migrateV2toV3(obj); }
+
+  return obj;
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +398,8 @@ export function composeClassroom(pf: ProjectFile): LoadedProject {
     gridW: pf.classroom.gridW,
     gridH: pf.classroom.gridH,
     furniture: furnitureList,
+    cellsPerUnit: pf.classroom.cellsPerUnit,
+    thresholdUnits: pf.classroom.thresholdUnits,
   };
 
   const locks: FurnitureId[] = pf.locks.map(furnitureId);
@@ -425,13 +474,15 @@ export function extractProject(state: ProjectState): ProjectFile {
   }));
 
   return {
-    version: 1,
+    version: 2,
     classroom: {
       id: classroom.id,
       name: classroom.name,
       gridW: classroom.gridW,
       gridH: classroom.gridH,
       furniture: pfFurniture,
+      cellsPerUnit: classroom.cellsPerUnit,
+      thresholdUnits: classroom.thresholdUnits,
     },
     roster: pfRoster,
     arrangement,
@@ -523,13 +574,15 @@ export function importLegacyClassroom(json: string): ProjectFile {
   const classroomId = `legacy-${proto.name}`;
 
   return {
-    version: 1,
+    version: 2,
     classroom: {
       id: classroomId,
       name: proto.name,
       gridW: proto.grid_width,
       gridH: proto.grid_height,
       furniture: pfFurniture,
+      cellsPerUnit: DEFAULT_CELLS_PER_UNIT,
+      thresholdUnits: DEFAULT_THRESHOLD_UNITS,
     },
     roster: [],
     arrangement: {},

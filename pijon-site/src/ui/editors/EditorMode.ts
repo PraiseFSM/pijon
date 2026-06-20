@@ -124,9 +124,10 @@ export interface EditorContext {
  *  - paintOverlay draws a drag ghost and neighbor highlight.
  *  - onPointerUp commits manualReassign via ctx.store.
  *
- * For Phase 10 (PreferenceEditor):
+ * For Phase 10 / §12.4 (StudentEditor — preference assigner, merged):
  *  - Track first-click occupant; second click completes a preference pair.
  *  - paintOverlay draws connecting lines between paired occupants.
+ *  - PreferenceEditor has been merged into StudentEditor and deleted.
  */
 export interface EditorMode {
   /** Stable identifier — used by EditorSwitcher and the store (activeEditorId). */
@@ -142,10 +143,20 @@ export interface EditorMode {
   readonly Toolbar: React.FC<{ ctx: EditorContext }>;
 
   /**
-   * React component rendered into the SidePanel when this editor is active.
-   * Receives the current EditorContext.
+   * React component rendered into the SidePanel (left panel) when this editor
+   * is active. Receives the current EditorContext.
    */
   readonly SidePanel: React.FC<{ ctx: EditorContext }>;
+
+  /**
+   * Optional right-hand panel component rendered to the RIGHT of the canvas
+   * when this editor is active. Mirrors the left SidePanel; omit for editors
+   * that have no right panel (e.g. FurnitureEditor).
+   *
+   * Added in §12.4 to host the StudentEditor's preferences panel without
+   * touching FurnitureEditor or the canvas.
+   */
+  readonly RightPanel?: React.FC<{ ctx: EditorContext }>;
 
   /**
    * Called once when this editor becomes the active tool.
@@ -176,6 +187,23 @@ export interface EditorMode {
    * student name onto a desk). Call e.preventDefault() to accept.
    */
   onDrop(e: DragEvent, ctx: EditorContext): void;
+
+  /**
+   * Optional dragover handler — forwarded from the canvas during an HTML5 drag.
+   * Editors that want to paint a live preview during drag-from-palette should
+   * implement this. The canvas always calls e.preventDefault() before delegating
+   * so the drop is accepted regardless.
+   *
+   * This is OPTIONAL — editors that don't need it can omit it (e.g. NoopEditor,
+   * StudentEditor). The canvas checks for its presence before calling.
+   */
+  onDragOver?(e: DragEvent, ctx: EditorContext): void;
+
+  /**
+   * Optional dragend handler — called when an HTML5 drag ends (on drop or cancel).
+   * Use to clear any live-preview state painted during dragover.
+   */
+  onDragEnd?(e: DragEvent, ctx: EditorContext): void;
 
   /** Right-click / long-press context menu on the canvas. */
   onContextMenu(e: MouseEvent, ctx: EditorContext): void;

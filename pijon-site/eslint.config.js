@@ -110,6 +110,12 @@ export default tseslint.config(
     files: ['src/**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
+      // `expect(mock.method).toHaveBeenCalled()` is idiomatic in Vitest — the
+      // "unbound method" concern does not apply to jest/vi mock functions.
+      '@typescript-eslint/unbound-method': 'off',
+      // Tests sometimes check conditions that TypeScript can statically resolve —
+      // acceptable in test assertions where clarity beats brevity.
+      '@typescript-eslint/no-unnecessary-condition': 'off',
     },
   },
 );
