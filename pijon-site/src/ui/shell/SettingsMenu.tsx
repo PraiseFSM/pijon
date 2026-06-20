@@ -25,6 +25,26 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import type { EditorContext } from '../editors/EditorMode.js';
 import { usePijonStore } from '../../state/store.js';
+import {
+  settingsPopoverBackground,
+  settingsPopoverBorder,
+  settingsPopoverShadow,
+  settingsHeaderText,
+  settingsLabelText,
+  dividerLight,
+  activeButtonBackground,
+  activeButtonBorder,
+  activeButtonText,
+  btnBackground,
+  btnBorder,
+  textDark,
+  gearButtonBorder,
+  gearButtonBorderActive,
+  gearButtonBackground,
+  gearButtonBackgroundActive,
+  gearButtonText,
+  gearButtonTextActive,
+} from '../../theme/colors.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -103,7 +123,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
 
   const labelStyle: React.CSSProperties = {
     fontSize: '0.82rem',
-    color: '#333',
+    color: settingsLabelText,
     flexShrink: 0,
   };
 
@@ -111,9 +131,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
     padding: '3px 10px',
     borderRadius: 4,
     border: '1px solid',
-    borderColor: on ? '#1565c0' : '#bbb',
-    background: on ? '#1565c0' : '#fff',
-    color: on ? '#fff' : '#333',
+    borderColor: on ? activeButtonBorder : btnBorder,
+    background: on ? activeButtonBackground : btnBackground,
+    color: on ? activeButtonText : textDark,
     cursor: 'pointer',
     fontSize: '0.8rem',
     whiteSpace: 'nowrap',
@@ -131,10 +151,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
         top: '100%',
         right: 0,
         zIndex: 1200,
-        background: '#fff',
-        border: '1px solid #ccc',
+        background: settingsPopoverBackground,
+        border: `1px solid ${settingsPopoverBorder}`,
         borderRadius: 6,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        boxShadow: `0 4px 16px ${settingsPopoverShadow}`,
         minWidth: 240,
         padding: '10px 14px 12px',
         marginTop: 2,
@@ -147,10 +167,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
           fontSize: '0.8rem',
           textTransform: 'uppercase',
           letterSpacing: '0.06em',
-          color: '#555',
+          color: settingsHeaderText,
           marginBottom: 8,
           paddingBottom: 6,
-          borderBottom: '1px solid #eee',
+          borderBottom: `1px solid ${dividerLight}`,
         }}
       >
         Settings
@@ -171,7 +191,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
             width: 62,
             padding: '2px 4px',
             borderRadius: 4,
-            border: '1px solid #bbb',
+            border: `1px solid ${btnBorder}`,
             fontSize: '0.8rem',
             textAlign: 'right',
           }}
@@ -180,7 +200,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
       </div>
 
       {/* Divider */}
-      <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }} />
+      <div style={{ borderTop: `1px solid ${dividerLight}`, margin: '4px 0' }} />
 
       {/* Show violations toggle */}
       <div style={rowStyle}>
@@ -220,9 +240,9 @@ export const GearButton: React.FC<GearButtonProps> = ({ open, onClick }) => (
       padding: '4px 8px',
       borderRadius: 4,
       border: '1px solid',
-      borderColor: open ? '#1565c0' : '#bbb',
-      background: open ? '#e3f2fd' : '#fff',
-      color: open ? '#1565c0' : '#555',
+      borderColor: open ? gearButtonBorderActive : gearButtonBorder,
+      background: open ? gearButtonBackgroundActive : gearButtonBackground,
+      color: open ? gearButtonTextActive : gearButtonText,
       cursor: 'pointer',
       fontSize: '1rem',
       lineHeight: 1,

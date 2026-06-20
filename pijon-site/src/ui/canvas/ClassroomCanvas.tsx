@@ -20,6 +20,9 @@
 import { useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { usePijonStore } from '../../state/store.js';
 import { renderBasePass } from './render.js';
+import { registerRepaintCallback, primeImage } from './imageCache.js';
+import { furnitureAssetUrl } from '../../assets/paths.js';
+import { ASSET } from '../../assets/paths.js';
 import { clientToCell, furnitureAtCell, cellToPixelRect } from './hitTest.js';
 import type { EditorContext, EditorMode, CanvasView } from '../editors/EditorMode.js';
 import { NoopEditor } from '../editors/NoopEditor.js';
@@ -118,7 +121,8 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
       const lk = locksRef.current;
 
       // Base render pass (grid + furniture + occupant names)
-      renderBasePass(ctx, cl, cs, lk);
+      // §14.5: pass classroom.gridColor (null = use theme default)
+      renderBasePass(ctx, cl, cs, lk, cl.gridColor ?? undefined);
 
       // Editor overlay — uses the ref so we always call the current editor's method
       const view = buildCanvasView(
@@ -203,6 +207,27 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
       }
     };
   }, []);
+
+  // -------------------------------------------------------------------------
+  // §14.3 — Image cache: prime furniture assets on mount and register a
+  // repaint callback so the canvas redraws once images finish loading.
+  // The color fallback is shown on the first paint; images replace it seamlessly.
+  // -------------------------------------------------------------------------
+
+  useEffect(() => {
+    // Prime all known furniture kind images so they start loading immediately
+    const kinds = ['single_desk', 'table', 'teacher_desk', 'whiteboard'] as const;
+    for (const kind of kinds) {
+      const url = furnitureAssetUrl(kind);
+      if (url !== undefined) primeImage(url);
+    }
+    // Also prime the background asset (may be used if teacher enables it later)
+    primeImage(ASSET.background);
+
+    // Register the canvas scheduleRepaint so the canvas redraws when images load
+    const unregister = registerRepaintCallback(scheduleRepaint);
+    return unregister;
+  }, [scheduleRepaint]);
 
   // -------------------------------------------------------------------------
   // Editor lifecycle: deactivate old, activate new when the active editor changes

@@ -140,6 +140,19 @@ const ClassroomGeometrySchema = z.object({
    * SeatGraph converts to cells: thresholdCells = thresholdUnits * cellsPerUnit.
    */
   thresholdUnits: z.number().positive().default(DEFAULT_THRESHOLD_UNITS),
+  /**
+   * §14.4: optional classroom background image URL.
+   * Defaults to null (no background image — current appearance preserved).
+   * Absent in v1/v2 files → null via .nullable().default(null).
+   */
+  backgroundImage: z.string().nullable().default(null),
+  /**
+   * §14.5: optional grid line color override (any CSS color string).
+   * Defaults to null (use theme default — current appearance preserved).
+   * Absent in v1/v2 files → null via .nullable().default(null).
+   * Additive: old files load without errors and round-trip safely.
+   */
+  gridColor: z.string().nullable().default(null),
 });
 
 /**
@@ -400,6 +413,8 @@ export function composeClassroom(pf: ProjectFile): LoadedProject {
     furniture: furnitureList,
     cellsPerUnit: pf.classroom.cellsPerUnit,
     thresholdUnits: pf.classroom.thresholdUnits,
+    backgroundImage: pf.classroom.backgroundImage ?? null,
+    gridColor: pf.classroom.gridColor ?? null,
   };
 
   const locks: FurnitureId[] = pf.locks.map(furnitureId);
@@ -483,6 +498,8 @@ export function extractProject(state: ProjectState): ProjectFile {
       furniture: pfFurniture,
       cellsPerUnit: classroom.cellsPerUnit,
       thresholdUnits: classroom.thresholdUnits,
+      backgroundImage: classroom.backgroundImage ?? null,
+      gridColor: classroom.gridColor ?? null,
     },
     roster: pfRoster,
     arrangement,
@@ -583,6 +600,8 @@ export function importLegacyClassroom(json: string): ProjectFile {
       furniture: pfFurniture,
       cellsPerUnit: DEFAULT_CELLS_PER_UNIT,
       thresholdUnits: DEFAULT_THRESHOLD_UNITS,
+      backgroundImage: null,
+      gridColor: null,
     },
     roster: [],
     arrangement: {},

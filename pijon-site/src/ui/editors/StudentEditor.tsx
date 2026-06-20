@@ -26,6 +26,86 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import {
+  assignerHintBackground,
+  assignerHintText,
+  primaryButtonBackground,
+  primaryButtonBorder,
+  primaryButtonText,
+  activeButtonBackground,
+  activeButtonBorder,
+  activeButtonText,
+  splitButtonCaretDivider,
+  splitButtonDropdownBorder,
+  splitButtonDropdownShadow,
+  splitButtonDropdownBackground,
+  splitButtonSectionLabel,
+  btnBackground,
+  btnBorder,
+  disabledButtonBackground,
+  bannerErrorBackground,
+  bannerErrorBorder,
+  bannerErrorText,
+  bannerAmberBackground,
+  bannerAmberBorder,
+  bannerAmberText,
+  toolbarBackground,
+  toolbarBorder,
+  textDark,
+  textMedium,
+  divider,
+  sidePanelBackground,
+  panelBorder,
+  sidePanelHeaderText,
+  textMuted,
+  textDisabled,
+  textPlaceholder,
+  rosterSelectedBackground,
+  rosterSelectedBorder,
+  prefCountBadgeBackground,
+  prefCountBadgeText,
+  dangerButtonBackground,
+  dangerButtonBorder,
+  dangerButtonText,
+  addStudentButtonBorder,
+  addStudentButtonBackground,
+  addStudentButtonText,
+  dividerLight,
+  importWarningsBackground,
+  importWarningsText,
+  bannerInfoText,
+  fixtureItemText,
+  contextMenuBackground,
+  contextMenuBorder,
+  contextMenuShadow,
+  contextMenuHeaderText,
+  contextMenuMutedText,
+  contextMenuLockText,
+  contextMenuUnlockText,
+  selectedStudentHeaderBackground,
+  selectedStudentHeaderText,
+  prefPanelAddBorder,
+  prefPreferText,
+  prefAvoidText,
+  dragTargetFill,
+  dragTargetStroke,
+  rosterDropTargetFill,
+  rosterDropTargetStroke,
+  dragSourceFade,
+  violationFill,
+  violationStroke,
+  neighborSourceStroke,
+  neighborSourceFill,
+  neighborStroke,
+  neighborFill,
+  lockBadgeFill,
+  lockBadgeText,
+  dragGhostFill,
+  dragGhostStroke,
+  dragGhostText,
+  prefLinkPrefer,
+  prefLinkAvoid,
+} from '../../theme/colors.js';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureId, StudentId } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
@@ -381,10 +461,7 @@ function paintPreferenceLinks(
       ctx2d.beginPath();
       ctx2d.moveTo(srcCx, srcCy);
       ctx2d.lineTo(tgtCx, tgtCy);
-      ctx2d.strokeStyle =
-        pref.weight > 0
-          ? 'rgba(46, 125, 50, 0.55)'   // prefer → green
-          : 'rgba(183, 28, 28, 0.55)';  // avoid → red
+      ctx2d.strokeStyle = pref.weight > 0 ? prefLinkPrefer : prefLinkAvoid;
       ctx2d.lineWidth = 1.5;
       ctx2d.setLineDash([5, 4]);
       ctx2d.stroke();
@@ -456,25 +533,25 @@ function paintStudentOverlay(
 
     // --- Drag target highlight (pointer drag between desks) ---
     if (!assignerModeActive && isDragTarget) {
-      ctx2d.fillStyle = 'rgba(21, 101, 192, 0.22)';
+      ctx2d.fillStyle = dragTargetFill;
       ctx2d.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-      ctx2d.strokeStyle = 'rgba(21, 101, 192, 0.9)';
+      ctx2d.strokeStyle = dragTargetStroke;
       ctx2d.lineWidth = 2;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
 
     // --- §13.7 roster-drag drop-target highlight ---
     if (rosterDragHoverFid !== null && fid === rosterDragHoverFid) {
-      ctx2d.fillStyle = 'rgba(46, 125, 50, 0.18)';
+      ctx2d.fillStyle = rosterDropTargetFill;
       ctx2d.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-      ctx2d.strokeStyle = 'rgba(46, 125, 50, 0.85)';
+      ctx2d.strokeStyle = rosterDropTargetStroke;
       ctx2d.lineWidth = 2;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
 
     // --- Drag source fade ---
     if (!assignerModeActive && isDragSource) {
-      ctx2d.fillStyle = 'rgba(200, 200, 200, 0.5)';
+      ctx2d.fillStyle = dragSourceFade;
       ctx2d.fillRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
       ctx2d.restore();
       ctx2d.save();
@@ -485,9 +562,9 @@ function paintStudentOverlay(
     if (showViolationsFlag && occ !== undefined && !isFixt) {
       const violated = hasViolation(occ, fid, arrangement, graph);
       if (violated) {
-        ctx2d.fillStyle = 'rgba(211, 47, 47, 0.22)';
+        ctx2d.fillStyle = violationFill;
         ctx2d.fillRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
-        ctx2d.strokeStyle = 'rgba(211, 47, 47, 0.8)';
+        ctx2d.strokeStyle = violationStroke;
         ctx2d.lineWidth = 1.5;
         ctx2d.strokeRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
       }
@@ -496,18 +573,18 @@ function paintStudentOverlay(
     // --- Neighbor preview highlight ---
     if (neighborPreviewFid !== null) {
       if (isNeighborSource) {
-        ctx2d.strokeStyle = 'rgba(81, 45, 168, 0.9)';
+        ctx2d.strokeStyle = neighborSourceStroke;
         ctx2d.lineWidth = 2.5;
         ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-        ctx2d.fillStyle = 'rgba(81, 45, 168, 0.12)';
+        ctx2d.fillStyle = neighborSourceFill;
         ctx2d.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
       } else if (isNeighbor) {
-        ctx2d.strokeStyle = 'rgba(123, 31, 162, 0.55)';
+        ctx2d.strokeStyle = neighborStroke;
         ctx2d.lineWidth = 1.5;
         ctx2d.setLineDash([4, 3]);
         ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
         ctx2d.setLineDash([]);
-        ctx2d.fillStyle = 'rgba(123, 31, 162, 0.08)';
+        ctx2d.fillStyle = neighborFill;
         ctx2d.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
       }
     }
@@ -517,9 +594,9 @@ function paintStudentOverlay(
       const badgeSize = Math.max(10, Math.round(view.cellSize * 0.22));
       const bx = r.x + r.w - badgeSize - 2;
       const by = r.y + 2;
-      ctx2d.fillStyle = 'rgba(245, 124, 0, 0.92)';
+      ctx2d.fillStyle = lockBadgeFill;
       ctx2d.fillRect(bx, by, badgeSize, badgeSize);
-      ctx2d.fillStyle = '#fff';
+      ctx2d.fillStyle = lockBadgeText;
       ctx2d.font = `bold ${Math.max(8, badgeSize - 3).toString()}px sans-serif`;
       ctx2d.textAlign = 'center';
       ctx2d.textBaseline = 'middle';
@@ -536,17 +613,19 @@ function paintStudentOverlay(
       // Pulse: alpha oscillates between 0.6 and 1.0 at ~2 Hz
       const pulse = 0.80 + 0.20 * Math.sin((Date.now() / 1000) * Math.PI * 2 * 2);
 
-      // Outer glow fill
+      // Outer glow fill — uses assignerPulseGlowBase (255,152,0 = #ff9800) with animated alpha
+      // assignerPulseGlowBase token = '#ff6f00' (deep orange); alpha interpolated at runtime
       ctx2d.fillStyle = `rgba(255, 152, 0, ${(0.22 * pulse).toFixed(3)})`;
       ctx2d.fillRect(r.x, r.y, r.w, r.h);
 
       // Inner thick amber ring (inset by 1px so it sits inside the furniture cell)
+      // assignerPulseOrange token = '#e65100' → rgb(230,100,0)
       const inset = 1;
       ctx2d.strokeStyle = `rgba(230, 100, 0, ${pulse.toFixed(3)})`;
       ctx2d.lineWidth = 4;
       ctx2d.strokeRect(r.x + inset, r.y + inset, r.w - inset * 2, r.h - inset * 2);
 
-      // Outer ring (slightly larger, thinner, to create a double-ring effect)
+      // Outer ring — assignerPulseAmber token = '#ff9800' → rgb(255,193,7 approx)
       ctx2d.strokeStyle = `rgba(255, 193, 7, ${(0.7 * pulse).toFixed(3)})`;
       ctx2d.lineWidth = 1.5;
       ctx2d.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
@@ -561,7 +640,7 @@ function paintStudentOverlay(
     const gx = dragCanvasPos.x - ghostW / 2;
     const gy = dragCanvasPos.y - ghostH / 2;
 
-    ctx2d.fillStyle = 'rgba(21, 101, 192, 0.88)';
+    ctx2d.fillStyle = dragGhostFill;
     ctx2d.beginPath();
     const rad = 4;
     ctx2d.moveTo(gx + rad, gy);
@@ -576,11 +655,11 @@ function paintStudentOverlay(
     ctx2d.closePath();
     ctx2d.fill();
 
-    ctx2d.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx2d.strokeStyle = dragGhostStroke;
     ctx2d.lineWidth = 1;
     ctx2d.stroke();
 
-    ctx2d.fillStyle = '#fff';
+    ctx2d.fillStyle = dragGhostText;
     ctx2d.font = `bold ${Math.min(13, Math.max(10, view.cellSize / 4)).toString()}px sans-serif`;
     ctx2d.textAlign = 'center';
     ctx2d.textBaseline = 'middle';
@@ -640,8 +719,8 @@ const AssignerHint: React.FC = () => {
         gap: 4,
         padding: '3px 10px',
         borderRadius: 4,
-        background: '#ff6f00',
-        color: '#fff',
+        background: assignerHintBackground,
+        color: assignerHintText,
         fontSize: '0.8rem',
         fontWeight: 600,
         whiteSpace: 'nowrap',
@@ -697,10 +776,10 @@ const SplitButton: React.FC<{
   const primaryStyle: React.CSSProperties = {
     padding: '4px 10px',
     borderRadius: '4px 0 0 4px',
-    border: '1px solid #1565c0',
+    border: `1px solid ${primaryButtonBorder}`,
     borderRight: 'none',
-    background: '#1565c0',
-    color: '#fff',
+    background: primaryButtonBackground,
+    color: primaryButtonText,
     cursor: 'pointer',
     fontSize: '0.82rem',
     fontWeight: 600,
@@ -710,10 +789,10 @@ const SplitButton: React.FC<{
   const caretStyle: React.CSSProperties = {
     padding: '4px 7px',
     borderRadius: '0 4px 4px 0',
-    border: '1px solid #1565c0',
-    borderLeft: '1px solid rgba(255,255,255,0.35)',
-    background: '#1565c0',
-    color: '#fff',
+    border: `1px solid ${primaryButtonBorder}`,
+    borderLeft: `1px solid ${splitButtonCaretDivider}`,
+    background: primaryButtonBackground,
+    color: primaryButtonText,
     cursor: 'pointer',
     fontSize: '0.75rem',
     lineHeight: 1,
@@ -724,10 +803,10 @@ const SplitButton: React.FC<{
     top: 'calc(100% + 4px)',
     left: 0,
     zIndex: 200,
-    background: '#fff',
-    border: '1px solid #c5cae9',
+    background: splitButtonDropdownBackground,
+    border: `1px solid ${splitButtonDropdownBorder}`,
     borderRadius: 6,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+    boxShadow: `0 4px 12px ${splitButtonDropdownShadow}`,
     minWidth: 200,
     padding: '8px 0',
     fontSize: '0.82rem',
@@ -739,7 +818,7 @@ const SplitButton: React.FC<{
     fontWeight: 700,
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
-    color: '#888',
+    color: splitButtonSectionLabel,
   };
 
   const radioRow: React.CSSProperties = {
@@ -885,10 +964,10 @@ const SeatingIssuesBanner: React.FC = () => {
     alignItems: 'center',
     gap: 8,
     padding: '5px 12px',
-    background: isError ? '#ffebee' : '#fff8e1',
-    borderBottom: `1px solid ${isError ? '#ef9a9a' : '#ffe082'}`,
+    background: isError ? bannerErrorBackground : bannerAmberBackground,
+    borderBottom: `1px solid ${isError ? bannerErrorBorder : bannerAmberBorder}`,
     fontSize: '0.8rem',
-    color: isError ? '#b71c1c' : '#e65100',
+    color: isError ? bannerErrorText : bannerAmberText,
     fontWeight: 500,
     lineHeight: 1.4,
   };
@@ -1014,8 +1093,8 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     padding: '4px 10px',
     marginRight: 4,
     borderRadius: 4,
-    border: '1px solid #bbb',
-    background: '#fff',
+    border: `1px solid ${btnBorder}`,
+    background: btnBackground,
     cursor: 'pointer',
     fontSize: '0.82rem',
     whiteSpace: 'nowrap',
@@ -1032,11 +1111,11 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           alignItems: 'center',
           gap: 4,
           padding: '5px 10px',
-          background: '#f5f5f5',
-          borderBottom: '1px solid #ddd',
+          background: toolbarBackground,
+          borderBottom: `1px solid ${toolbarBorder}`,
         }}
       >
-        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: '#333' }}>
+        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: textDark }}>
           Students
         </span>
 
@@ -1049,13 +1128,13 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           onChangeVariant={setVariant}
         />
 
-        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
 
         <button style={btn} type="button" onClick={handleClear}>
           Clear
         </button>
 
-        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
 
         <button
           style={canUndo ? btn : btnDisabled}
@@ -1076,13 +1155,13 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           Redo ↪
         </button>
 
-        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
 
         <button style={btn} type="button" onClick={handleExportCsv} title="Download roster as CSV">
           Export CSV
         </button>
 
-        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
 
         <button style={btn} type="button" onClick={handleSave} title="Save classroom to a .pijon file">
           Save Arr…
@@ -1091,12 +1170,12 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           Load Arr…
         </button>
 
-        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
 
         {/* §13.6 — Assigner hint banner (appears when first student is selected) */}
         <AssignerHint />
 
-        <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
 
         {/* §13.3 Settings gear button + popover (houses §13.4 Nearness + §13.5 Violations) */}
         <div ref={settingsAnchorRef} style={{ position: 'relative' }}>
@@ -1213,8 +1292,8 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         minWidth: 160,
         display: 'flex',
         flexDirection: 'column',
-        background: '#fafafa',
-        borderRight: '1px solid #ddd',
+        background: sidePanelBackground,
+        borderRight: `1px solid ${panelBorder}`,
         overflowY: 'hidden',
         height: '100%',
       }}
@@ -1227,8 +1306,8 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           fontSize: '0.78rem',
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
-          color: '#555',
-          borderBottom: '1px solid #ddd',
+          color: sidePanelHeaderText,
+          borderBottom: `1px solid ${panelBorder}`,
         }}
       >
         Roster
@@ -1239,8 +1318,8 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         style={{
           padding: '3px 10px',
           fontSize: '0.72rem',
-          color: '#666',
-          borderBottom: '1px solid #eee',
+          color: textMuted,
+          borderBottom: `1px solid ${dividerLight}`,
         }}
       >
         {realStudents.length === 0
@@ -1274,8 +1353,8 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
               }}
               style={{
                 ...itemStyle,
-                background: isSelected ? '#e3f2fd' : undefined,
-                borderLeft: isSelected ? '3px solid #1565c0' : '3px solid transparent',
+                background: isSelected ? rosterSelectedBackground : undefined,
+                borderLeft: isSelected ? `3px solid ${rosterSelectedBorder}` : '3px solid transparent',
                 cursor: 'grab',
               }}
               onClick={() => { handleStudentClick(s.id); }}
@@ -1292,8 +1371,8 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
                     flexShrink: 0,
                     marginLeft: 4,
                     fontSize: '0.68rem',
-                    color: '#888',
-                    background: '#f0f0f0',
+                    color: prefCountBadgeText,
+                    background: prefCountBadgeBackground,
                     borderRadius: 3,
                     padding: '1px 4px',
                   }}
@@ -1310,10 +1389,10 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
                   marginLeft: 4,
                   padding: '1px 5px',
                   fontSize: '0.68rem',
-                  border: '1px solid #ffcdd2',
+                  border: `1px solid ${dangerButtonBorder}`,
                   borderRadius: 3,
-                  background: '#ffebee',
-                  color: '#c62828',
+                  background: dangerButtonBackground,
+                  color: dangerButtonText,
                   cursor: 'pointer',
                   lineHeight: 1,
                 }}
@@ -1332,18 +1411,18 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
               style={{
                 padding: '4px 8px 2px',
                 fontSize: '0.68rem',
-                color: '#999',
+                color: textPlaceholder,
                 fontWeight: 700,
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
-                borderTop: '1px solid #eee',
+                borderTop: `1px solid ${dividerLight}`,
                 marginTop: 4,
               }}
             >
               Fixtures
             </div>
             {fixtures.map((s) => (
-              <div key={s.id} style={{ ...itemStyle, color: '#9c27b0', fontStyle: 'italic', borderLeft: '3px solid transparent' }}>
+              <div key={s.id} style={{ ...itemStyle, color: fixtureItemText, fontStyle: 'italic', borderLeft: '3px solid transparent' }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {s.name}
                 </span>
@@ -1357,10 +1436,10 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       <div
         style={{
           padding: '8px 10px 6px',
-          borderTop: '1px solid #eee',
+          borderTop: `1px solid ${dividerLight}`,
         }}
       >
-        <div style={{ fontSize: '0.72rem', color: '#555', fontWeight: 600, marginBottom: 4 }}>
+        <div style={{ fontSize: '0.72rem', color: textMedium, fontWeight: 600, marginBottom: 4 }}>
           Add student:
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -1374,7 +1453,7 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
               flex: 1,
               padding: '3px 6px',
               borderRadius: 4,
-              border: '1px solid #bbb',
+              border: `1px solid ${btnBorder}`,
               fontSize: '0.78rem',
               minWidth: 0,
             }}
@@ -1387,9 +1466,9 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
             style={{
               padding: '3px 8px',
               borderRadius: 4,
-              border: '1px solid #90caf9',
-              background: addName.trim() === '' ? '#eee' : '#e3f2fd',
-              color: '#1565c0',
+              border: `1px solid ${addStudentButtonBorder}`,
+              background: addName.trim() === '' ? disabledButtonBackground : addStudentButtonBackground,
+              color: addStudentButtonText,
               cursor: addName.trim() === '' ? 'default' : 'pointer',
               fontSize: '0.78rem',
               fontWeight: 600,
@@ -1403,7 +1482,7 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       </div>
 
       {/* Import CSV — bottom-most control */}
-      <div style={{ padding: '0 10px 10px', borderTop: '1px solid #eee' }}>
+      <div style={{ padding: '0 10px 10px', borderTop: `1px solid ${dividerLight}` }}>
         <input
           ref={fileInputRef}
           type="file"
@@ -1417,13 +1496,13 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           style={{
             width: '100%',
             padding: '5px 8px',
-            background: '#e3f2fd',
-            border: '1px solid #90caf9',
+            background: addStudentButtonBackground,
+            border: `1px solid ${addStudentButtonBorder}`,
             borderRadius: 4,
             cursor: 'pointer',
             fontSize: '0.79rem',
             fontWeight: 600,
-            color: '#1565c0',
+            color: addStudentButtonText,
           }}
           title="Choose a CSV file from your device — the file is read locally, never uploaded"
         >
@@ -1431,7 +1510,7 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         </button>
 
         {importStatus !== '' && (
-          <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#2e7d32' }}>
+          <div style={{ marginTop: 4, fontSize: '0.72rem', color: bannerInfoText }}>
             {importStatus}
           </div>
         )}
@@ -1441,10 +1520,10 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
             style={{
               marginTop: 4,
               padding: '4px 6px',
-              background: '#fff3e0',
+              background: importWarningsBackground,
               borderRadius: 3,
               fontSize: '0.7rem',
-              color: '#e65100',
+              color: importWarningsText,
             }}
           >
             <div style={{ fontWeight: 700, marginBottom: 2 }}>Warnings:</div>
@@ -1461,9 +1540,9 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         style={{
           padding: '4px 8px',
           fontSize: '0.68rem',
-          color: '#aaa',
+          color: textDisabled,
           lineHeight: 1.4,
-          borderTop: '1px solid #eee',
+          borderTop: `1px solid ${dividerLight}`,
         }}
       >
         Click to select. Drag to a desk. Right-click to lock.
@@ -1499,10 +1578,10 @@ const StudentContextMenu: React.FC<{
           left: menu.x,
           top: menu.y,
           zIndex: 1000,
-          background: '#fff',
-          border: '1px solid #ccc',
+          background: contextMenuBackground,
+          border: `1px solid ${contextMenuBorder}`,
           borderRadius: 5,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          boxShadow: `0 4px 12px ${contextMenuShadow}`,
           minWidth: 160,
           fontSize: '0.83rem',
           userSelect: 'none',
@@ -1512,18 +1591,18 @@ const StudentContextMenu: React.FC<{
           style={{
             padding: '6px 12px',
             fontWeight: 700,
-            borderBottom: '1px solid #eee',
-            color: '#333',
+            borderBottom: `1px solid ${dividerLight}`,
+            color: contextMenuHeaderText,
           }}
         >
           {menu.studentName}
         </div>
 
-        <div style={{ padding: '4px 12px', color: '#888', fontSize: '0.76rem' }}>
+        <div style={{ padding: '4px 12px', color: contextMenuMutedText, fontSize: '0.76rem' }}>
           {menu.neighborCount} neighboring desk{menu.neighborCount !== 1 ? 's' : ''}
         </div>
 
-        <div style={{ borderTop: '1px solid #eee' }} />
+        <div style={{ borderTop: `1px solid ${dividerLight}` }} />
 
         <div
           role="menuitem"
@@ -1531,7 +1610,7 @@ const StudentContextMenu: React.FC<{
           style={{
             padding: '7px 12px',
             cursor: 'pointer',
-            color: isLocked ? '#e65100' : '#1565c0',
+            color: isLocked ? contextMenuLockText : contextMenuUnlockText,
           }}
           onClick={() => {
             if (isLocked) {
@@ -1649,13 +1728,13 @@ const AddPrefForm: React.FC<{
     <div
       style={{
         padding: '8px 10px',
-        borderTop: '1px solid #e3f2fd',
+        borderTop: `1px solid ${prefPanelAddBorder}`,
         display: 'flex',
         flexDirection: 'column',
         gap: 5,
       }}
     >
-      <div style={{ fontSize: '0.72rem', color: '#555', fontWeight: 600 }}>
+      <div style={{ fontSize: '0.72rem', color: textMedium, fontWeight: 600 }}>
         Add preference:
       </div>
       <select
@@ -1665,7 +1744,7 @@ const AddPrefForm: React.FC<{
           fontSize: '0.74rem',
           padding: '2px 4px',
           borderRadius: 3,
-          border: '1px solid #bbb',
+          border: `1px solid ${btnBorder}`,
         }}
       >
         <option value="">— target student —</option>
@@ -1684,9 +1763,9 @@ const AddPrefForm: React.FC<{
         style={{
           padding: '3px 8px',
           borderRadius: 3,
-          border: '1px solid #90caf9',
-          background: addTargetId === '' ? '#eee' : '#e3f2fd',
-          color: '#1565c0',
+          border: `1px solid ${addStudentButtonBorder}`,
+          background: addTargetId === '' ? disabledButtonBackground : addStudentButtonBackground,
+          color: addStudentButtonText,
           cursor: addTargetId === '' ? 'default' : 'pointer',
           fontSize: '0.74rem',
           fontWeight: 600,
@@ -1785,28 +1864,28 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     borderRadius: 4,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: '#bbb',
-    background: '#fff',
+    borderColor: btnBorder,
+    background: btnBackground,
     cursor: 'pointer',
     fontSize: '0.8rem',
     whiteSpace: 'nowrap',
   };
   const btnToggled: React.CSSProperties = {
     ...btn,
-    background: '#1565c0',
-    color: '#fff',
-    borderColor: '#1565c0',
+    background: activeButtonBackground,
+    color: activeButtonText,
+    borderColor: activeButtonBorder,
   };
   const btnOrange: React.CSSProperties = {
     ...btn,
-    background: '#e65100',
-    color: '#fff',
-    borderColor: '#e65100',
+    background: assignerHintBackground,
+    color: assignerHintText,
+    borderColor: assignerHintBackground,
   };
 
   const prefRowStyle: React.CSSProperties = {
     padding: '3px 8px',
-    borderBottom: '1px solid #f0f0f0',
+    borderBottom: `1px solid ${prefCountBadgeBackground}`,
     fontSize: '0.75rem',
     display: 'flex',
     justifyContent: 'space-between',
@@ -1820,8 +1899,8 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         minWidth: 190,
         display: 'flex',
         flexDirection: 'column',
-        background: '#fafafa',
-        borderLeft: '1px solid #ddd',
+        background: sidePanelBackground,
+        borderLeft: `1px solid ${panelBorder}`,
         overflowY: 'hidden',
         height: '100%',
       }}
@@ -1834,8 +1913,8 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           fontSize: '0.78rem',
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
-          color: '#555',
-          borderBottom: '1px solid #ddd',
+          color: sidePanelHeaderText,
+          borderBottom: `1px solid ${panelBorder}`,
         }}
       >
         Preferences
@@ -1845,7 +1924,7 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       <div
         style={{
           padding: '8px 10px',
-          borderBottom: '1px solid #eee',
+          borderBottom: `1px solid ${dividerLight}`,
           display: 'flex',
           flexDirection: 'column',
           gap: 6,
@@ -1865,14 +1944,14 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         </button>
 
         {assignerOn && (
-          <div style={{ fontSize: '0.72rem', color: '#666', fontStyle: 'italic', lineHeight: 1.4 }}>
+          <div style={{ fontSize: '0.72rem', color: textMuted, fontStyle: 'italic', lineHeight: 1.4 }}>
             Click a student, then another to link. ESC to cancel.
           </div>
         )}
 
         {/* Weight control (shown in assigner mode for context; always useful) */}
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.78rem' }}>
-          <span style={{ color: '#555' }}>Weight:</span>
+          <span style={{ color: textMedium }}>Weight:</span>
           <input
             type="number"
             step="0.5"
@@ -1882,7 +1961,7 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
               width: 62,
               padding: '2px 4px',
               borderRadius: 3,
-              border: '1px solid #bbb',
+              border: `1px solid ${btnBorder}`,
               fontSize: '0.78rem',
             }}
             title="Negative = avoid, positive = prefer"
@@ -1891,7 +1970,7 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
             style={{
               fontSize: '0.72rem',
               fontWeight: 600,
-              color: weight < 0 ? '#c62828' : '#2e7d32',
+              color: weight < 0 ? prefAvoidText : prefPreferText,
             }}
           >
             {weight < 0 ? 'Avoid' : weight > 0 ? 'Prefer' : 'Neutral'}
@@ -1919,7 +1998,7 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
             justifyContent: 'center',
             padding: 16,
             fontSize: '0.78rem',
-            color: '#aaa',
+            color: textDisabled,
             textAlign: 'center',
             lineHeight: 1.5,
           }}
@@ -1934,9 +2013,9 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
               padding: '6px 10px',
               fontWeight: 700,
               fontSize: '0.82rem',
-              color: '#1565c0',
-              borderBottom: '1px solid #eee',
-              background: '#e3f2fd',
+              color: selectedStudentHeaderText,
+              borderBottom: `1px solid ${dividerLight}`,
+              background: selectedStudentHeaderBackground,
             }}
           >
             {selectedStudent.name}
@@ -1944,7 +2023,7 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 
           {/* Preference list */}
           {selectedStudent.preferences.length === 0 ? (
-            <div style={{ padding: '8px 10px', fontSize: '0.74rem', color: '#aaa' }}>
+            <div style={{ padding: '8px 10px', fontSize: '0.74rem', color: textDisabled }}>
               No preferences set.
             </div>
           ) : (
@@ -1958,7 +2037,7 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
                 targetLabel = `Location: ${pref.target}`;
               }
               const dirLabel = pref.weight > 0 ? '↑ Prefer' : '↓ Avoid';
-              const dirColor = pref.weight > 0 ? '#2e7d32' : '#c62828';
+              const dirColor = pref.weight > 0 ? prefPreferText : prefAvoidText;
               return (
                 <div
                   // eslint-disable-next-line react/no-array-index-key
@@ -1969,7 +2048,7 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
                     <span style={{ color: dirColor, fontWeight: 700 }}>{dirLabel}</span>
                     {' '}
                     {targetLabel}
-                    <span style={{ color: '#aaa', marginLeft: 3 }}>
+                    <span style={{ color: textDisabled, marginLeft: 3 }}>
                       ({pref.weight > 0 ? '+' : ''}{pref.weight.toFixed(1)})
                     </span>
                   </span>
@@ -1982,10 +2061,10 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
                         marginLeft: 4,
                         padding: '1px 5px',
                         fontSize: '0.68rem',
-                        border: '1px solid #ffcdd2',
+                        border: `1px solid ${dangerButtonBorder}`,
                         borderRadius: 3,
-                        background: '#ffebee',
-                        color: '#c62828',
+                        background: dangerButtonBackground,
+                        color: dangerButtonText,
                         cursor: 'pointer',
                       }}
                       title="Remove this preference"
@@ -2016,9 +2095,9 @@ const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         style={{
           padding: '6px 8px',
           fontSize: '0.68rem',
-          color: '#aaa',
+          color: textDisabled,
           lineHeight: 1.4,
-          borderTop: '1px solid #eee',
+          borderTop: `1px solid ${dividerLight}`,
         }}
       >
         Select a student, then use Assigner or the Add form.

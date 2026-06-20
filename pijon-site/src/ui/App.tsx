@@ -36,6 +36,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  appBackground,
+  canvasCardBackground,
+  canvasCardBorder,
+  canvasCardShadow,
+} from '../theme/colors.js';
 import { usePijonStore } from '../state/store.js';
 import { initPersistence, type PersistenceHandle } from '../state/persistence.js';
 import { ClassroomCanvas } from './canvas/ClassroomCanvas.js';
@@ -176,7 +182,7 @@ export default function App() {
           style={{
             flex: 1,
             overflow: 'auto',
-            background: '#f0f0f0',
+            background: appBackground,
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'flex-start',
@@ -185,11 +191,11 @@ export default function App() {
         >
           <div
             style={{
-              border: '1px solid #ccc',
+              border: `1px solid ${canvasCardBorder}`,
               display: 'inline-block',
               lineHeight: 0,
-              background: '#fff',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+              background: canvasCardBackground,
+              boxShadow: `0 1px 4px ${canvasCardShadow}`,
             }}
           >
             <ClassroomCanvas

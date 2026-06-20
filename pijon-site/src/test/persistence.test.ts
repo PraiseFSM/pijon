@@ -91,10 +91,18 @@ function makeProjectJson(classroomId: string, name = 'Test Class'): string {
  * Promise.resolve (drains microtask queue / .then() chains), repeating
  * until all async work is complete.
  */
+// `setImmediate` is a Node global (present under vitest/jsdom) but not in the
+// browser lib types this project compiles against. Reference it through a typed
+// alias. IMPORTANT: these tests fake `setTimeout`, so we must use the REAL
+// `setImmediate` (which is NOT faked) to drain fake-indexeddb's macrotask queue.
+const setImmediateReal = (
+  globalThis as unknown as { setImmediate: (cb: () => void) => void }
+).setImmediate;
+
 async function flushPromises(rounds = 10): Promise<void> {
   for (let i = 0; i < rounds; i++) {
-    // Drain setImmediate queue (fake-indexeddb IDB scheduling)
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Drain the macrotask queue (fake-indexeddb IDB scheduling)
+    await new Promise<void>((resolve) => { setImmediateReal(() => { resolve(); }); });
     // Drain microtask / Promise.then queue
     await Promise.resolve();
   }
@@ -131,23 +139,6 @@ async function openTestDB() {
       }
     },
   });
-}
-
-/** Wait until saveStatus reaches the expected value, advancing fake timers if needed. */
-async function waitForStatus(
-  status: string,
-  { advanceMs = 0 }: { advanceMs?: number } = {},
-): Promise<void> {
-  if (advanceMs > 0) vi.advanceTimersByTime(advanceMs);
-  await flushPromises();
-  // One more flush round to let the async IDB write resolve
-  await flushPromises();
-  const current = usePijonStore.getState().saveStatus;
-  if (current !== status) {
-    throw new Error(
-      `Expected saveStatus to be '${status}' but got '${current}'`,
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -950,7 +941,7 @@ describe('IDB key scheme', () => {
     const keys = await db.getAllKeys('projects');
     expect(keys).toContain(`project:${classroomId}`);
     // All keys follow the scheme
-    expect(keys.every((k) => typeof k === 'string' && (k as string).startsWith('project:'))).toBe(true);
+    expect(keys.every((k) => typeof k === 'string' && (k).startsWith('project:'))).toBe(true);
     db.close();
 
     handle.destroy();

@@ -908,7 +908,7 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
     fireEvent.click(screen.getByTestId('split-btn-primary'));
     expect(allocate).toHaveBeenCalledTimes(1);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+     
     const arg = allocate.mock.calls[0]?.[0];
     expect(arg).toBeInstanceOf(GreedyAllocator);
   });
@@ -921,7 +921,7 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     fireEvent.click(screen.getByTestId('split-algorithm-bogo'));
     fireEvent.click(screen.getByTestId('split-btn-primary'));
     expect(allocate).toHaveBeenCalledTimes(1);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+     
     const arg = allocate.mock.calls[0]?.[0];
     expect(arg).toBeInstanceOf(BogoAllocator);
   });
@@ -934,7 +934,7 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     fireEvent.click(screen.getByTestId('split-variant-smart_shuffle'));
     fireEvent.click(screen.getByTestId('split-btn-primary'));
     expect(smartShuffle).toHaveBeenCalledTimes(1);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+     
     const arg = smartShuffle.mock.calls[0]?.[0];
     expect(arg).toBeInstanceOf(GreedyAllocator);
   });

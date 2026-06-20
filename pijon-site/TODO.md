@@ -62,6 +62,25 @@
   students than seats / allocation can't place everyone / a manual action leaves an invalid state),
   show a clear error rather than failing silently. (Define "invalid" precisely during design.)
 
+### Iteration 4 — assets, theming & visual polish (→ IMPLEMENTATION_PLAN §14)
+
+Status: Iterations 2 (§12) and 3 (§13) COMPLETE. Iteration 4 in progress.
+
+- [x] **§14.1 Assets folder + reference doc.** `public/assets/` with fixed-name images + `ASSETS.md`;
+  placeholder PNGs shipped; asset path helper at `src/assets/paths.ts`. DONE.
+- [x] **§14.2 Central colors file.** `src/theme/colors.ts` defines all non-image colors; components
+  (App, shell, editors, render) refactored to use it. DONE.
+- [x] **§14.3 Furniture images.** Image-per-kind with color fallback + load-once image cache. DONE.
+- [x] **§14.4 Classroom background image.** Optional per-classroom background image, persisted. DONE.
+- [x] **§14.5 Adjustable grid color + picker.** Asset-icon button → live color picker; `gridColor`
+  persisted per classroom. DONE.
+- [ ] **§14.6 Granularity render density + center-based nearness (CORE).** Higher granularity → denser/
+  smaller squares, furniture keeps physical size (board size constant; px-per-fine-cell = base/G).
+  Nearness ALWAYS from furniture center; identical neighbor sets across granularity. FULL TESTS + review.
+- [ ] **§14.7 Resize buttons → in-grid "ghost ring".** Plus OUTSIDE the grid (where the new row/col would
+  appear) + minus INSIDE on the edge row/col to remove, for all four edges; lighter ghost-square ring;
+  Furniture-mode only. UI precision — ask if ambiguous.
+
 ## Deferred tests (write later)
 
 Tests were paused to conserve usage. Code below was shipped WITHOUT tests and needs an

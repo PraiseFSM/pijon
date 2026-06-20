@@ -64,6 +64,8 @@ import {
   resizeGrid as domainResizeGrid,
   setGranularity as domainSetGranularity,
   setThreshold as domainSetThreshold,
+  setBackgroundImage as domainSetBackgroundImage,
+  setGridColor as domainSetGridColor,
 } from '../domain/classroom.js';
 import { SeatGraph } from '../domain/seatGraph.js';
 import type { Allocator } from '../domain/allocators/types.js';
@@ -374,6 +376,23 @@ export interface PijonActions {
    * This is app-level UI state (not per-project) that defaults to true (§13.5).
    */
   setShowViolations(on: boolean): void;
+
+  /**
+   * §14.4 — Set or clear the classroom background image URL.
+   * Pass a URL string to enable (e.g. ASSET.background).
+   * Pass null to disable (restores plain-color appearance).
+   * Marks the project dirty for autosave.
+   */
+  setBackgroundImage(url: string | null): void;
+
+  /**
+   * §14.5 — Set or clear the classroom grid line color.
+   * Pass any valid CSS color string to override the theme default.
+   * Pass null to restore the theme default (gridLine token from colors.ts).
+   * Marks the project dirty for autosave.
+   * Same-reference short-circuit: no-ops when color hasn't changed.
+   */
+  setGridColor(color: string | null): void;
 
   // -- Erase --
 
@@ -974,6 +993,30 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
 
   setShowViolations(on: boolean) {
     set({ showViolations: on });
+  },
+
+  // ---- Background image (§14.4) -------------------------------------------
+
+  setBackgroundImage(url: string | null) {
+    set((s) => ({
+      classroom: domainSetBackgroundImage(s.classroom, url),
+      saveStatus: 'dirty' as const,
+    }));
+  },
+
+  // ---- Grid color (§14.5) -------------------------------------------------
+
+  setGridColor(color: string | null) {
+    set((s) => {
+      const newClassroom = domainSetGridColor(s.classroom, color);
+      // Same-reference short-circuit: domain helper returns c unchanged when color
+      // didn't change, so we avoid a spurious dirty mark + autosave.
+      if (newClassroom === s.classroom) return {};
+      return {
+        classroom: newClassroom,
+        saveStatus: 'dirty' as const,
+      };
+    });
   },
 
   // ---- Erase ---------------------------------------------------------------

@@ -15,6 +15,17 @@
 
 import { usePijonStore } from '../../state/store.js';
 import type { EditorContext, EditorMode } from '../editors/EditorMode.js';
+import {
+  toolbarBackground,
+  toolbarBorder,
+  panelBorder,
+  saveStatusSaved,
+  saveStatusSaving,
+  saveStatusDirty,
+  saveStatusError,
+  eraseButtonBorder,
+  eraseButtonText,
+} from '../../theme/colors.js';
 
 // Inject a tiny keyframe for the "saving…" pulse — done once, idempotent
 if (typeof document !== 'undefined') {
@@ -47,10 +58,10 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  saved: '#2e7d32',
-  saving: '#1565c0',
-  dirty: '#e65100',
-  error: '#b71c1c',
+  saved: saveStatusSaved,
+  saving: saveStatusSaving,
+  dirty: saveStatusDirty,
+  error: saveStatusError,
 };
 
 // ---------------------------------------------------------------------------
@@ -89,8 +100,8 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        borderBottom: '1px solid #ddd',
-        background: '#f5f5f5',
+        borderBottom: `1px solid ${toolbarBorder}`,
+        background: toolbarBackground,
       }}
     >
       {/* Active editor's Toolbar — fills remaining horizontal space */}
@@ -105,7 +116,7 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
           alignItems: 'center',
           gap: 10,
           padding: '0 12px',
-          borderLeft: '1px solid #ddd',
+          borderLeft: `1px solid ${panelBorder}`,
           flexShrink: 0,
           whiteSpace: 'nowrap',
         }}
@@ -131,9 +142,9 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
           style={{
             padding: '2px 8px',
             fontSize: '0.72rem',
-            color: '#b71c1c',
+            color: eraseButtonText,
             background: 'transparent',
-            border: '1px solid #e57373',
+            border: `1px solid ${eraseButtonBorder}`,
             borderRadius: 3,
             cursor: 'pointer',
             opacity: 0.75,

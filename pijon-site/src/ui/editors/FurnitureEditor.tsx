@@ -34,15 +34,53 @@
  * LOCAL-FIRST: no fetch(), no XHR, no WebSocket. All writes go through the Zustand store.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureKind, Vec2 } from '../../domain/types.js';
 import { furnitureId } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
 import { occupiedCells } from '../../domain/furniture.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
+import { getImage } from '../canvas/imageCache.js';
+import { furnitureAssetUrl, ASSET } from '../../assets/paths.js';
 import { makeClassroom } from '../../domain/classroom.js';
 import type { GridEdge } from '../../domain/classroom.js';
+import { GridColorButton, GridColorPickerPopover } from './GridColorPicker.js';
+import {
+  toolbarBackground,
+  toolbarBorder,
+  textDark,
+  textMedium,
+  textFainter,
+  textFaint,
+  textPlaceholder,
+  btnBackground,
+  btnBorder,
+  bannerWarningBackground,
+  bannerWarningBorder,
+  bannerWarningText,
+  bannerWarningButtonBorder,
+  furnitureFillByKind,
+  paletteItemBorder,
+  sidePanelBackground,
+  panelBorder,
+  sidePanelHeaderText,
+  selectionStroke,
+  gridDragOriginFade,
+  gridDragValidStroke,
+  gridDragInvalidFill,
+  gridDragInvalidStroke,
+  dragPreviewValidStroke,
+  dragPreviewInvalidFill,
+  dragPreviewInvalidStroke,
+  dropCollisionFlashFill,
+  furnitureFillSingleDesk,
+  furnitureFillTable,
+  furnitureFillTeacherDesk,
+  furnitureFillWhiteboard,
+  furnitureStroke,
+  furnitureStrokeFixture,
+} from '../../theme/colors.js';
 
 // ---------------------------------------------------------------------------
 // §13.1 — Transparent 1×1 image for suppressing the HTML5 drag ghost
@@ -253,6 +291,8 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const warning = ctx.store.resizeGridWarning;
   const classroom = ctx.store.classroom;
   const [granularityInput, setGranularityInput] = useState(classroom.cellsPerUnit);
+  /** §14.5 — grid color picker open state */
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
 
   const handleNew = () => {
     const fresh = makeClassroom(
@@ -313,11 +353,24 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     if (e.key === 'Enter') handleGranularityApply();
   };
 
+  /** §14.5 — Handle live grid color changes from the picker (onInput = continuous). */
+  const handleGridColorChange = useCallback(
+    (color: string | null) => {
+      ctx.store.setGridColor(color);
+      ctx.canvas.requestRepaint();
+    },
+    [ctx.store, ctx.canvas],
+  );
+
+  const handleColorPickerClose = useCallback(() => {
+    setColorPickerOpen(false);
+  }, []);
+
   const btn: React.CSSProperties = {
     padding: '3px 9px',
     borderRadius: 4,
-    border: '1px solid #bbb',
-    background: '#fff',
+    border: `1px solid ${btnBorder}`,
+    background: btnBackground,
     cursor: 'pointer',
     fontSize: '0.82rem',
     lineHeight: '1.4',
@@ -339,8 +392,8 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        background: '#f5f5f5',
-        borderBottom: '1px solid #ddd',
+        background: toolbarBackground,
+        borderBottom: `1px solid ${toolbarBorder}`,
       }}
     >
       {/* Warning banner */}
@@ -351,17 +404,17 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
             alignItems: 'center',
             gap: 8,
             padding: '4px 10px',
-            background: '#fff3e0',
-            borderBottom: '1px solid #ffe0b2',
+            background: bannerWarningBackground,
+            borderBottom: `1px solid ${bannerWarningBorder}`,
             fontSize: '0.78rem',
-            color: '#e65100',
+            color: bannerWarningText,
           }}
         >
           <span style={{ flex: 1 }}>⚠ {warning}</span>
           <button
             type="button"
             onClick={() => { ctx.store.dismissResizeWarning(); }}
-            style={{ ...btn, padding: '1px 7px', fontSize: '0.74rem', color: '#e65100', borderColor: '#ffb74d' }}
+            style={{ ...btn, padding: '1px 7px', fontSize: '0.74rem', color: bannerWarningText, borderColor: bannerWarningButtonBorder }}
           >
             ✕
           </button>
@@ -378,7 +431,7 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           padding: '5px 10px',
         }}
       >
-        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: '#333' }}>Furniture</span>
+        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: textDark }}>Furniture</span>
         <button style={btn} onClick={handleNew} type="button">New</button>
         <button style={btn} onClick={handleClear} type="button">Clear</button>
         <button style={btn} onClick={handleSave} type="button" title="Save classroom to a .pijon file">Save…</button>
@@ -387,10 +440,10 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         {sep}
 
         {/* Grid resize controls */}
-        <span style={{ fontSize: '0.78rem', color: '#555', fontWeight: 600 }}>Grid:</span>
+        <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>Grid:</span>
 
         {/* Top/Bottom rows */}
-        <span style={{ fontSize: '0.72rem', color: '#888' }}>Rows</span>
+        <span style={{ fontSize: '0.72rem', color: textFainter }}>Rows</span>
         <button
           style={btnSm}
           type="button"
@@ -417,7 +470,7 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         >−B</button>
 
         {/* Left/Right cols */}
-        <span style={{ fontSize: '0.72rem', color: '#888', marginLeft: 4 }}>Cols</span>
+        <span style={{ fontSize: '0.72rem', color: textFainter, marginLeft: 4 }}>Cols</span>
         <button
           style={btnSm}
           type="button"
@@ -444,14 +497,14 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         >−R</button>
 
         {/* Grid size readout */}
-        <span style={{ fontSize: '0.72rem', color: '#777', marginLeft: 4 }}>
+        <span style={{ fontSize: '0.72rem', color: textFaint, marginLeft: 4 }}>
           ({classroom.gridW}×{classroom.gridH})
         </span>
 
         {sep}
 
         {/* Granularity */}
-        <span style={{ fontSize: '0.78rem', color: '#555', fontWeight: 600 }}>Granularity:</span>
+        <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>Granularity:</span>
         <input
           type="number"
           min="1"
@@ -480,6 +533,52 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         >
           Apply
         </button>
+
+        {sep}
+
+        {/* §14.4 — Background image toggle */}
+        <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>BG:</span>
+        <button
+          type="button"
+          style={{
+            ...btn,
+            fontSize: '0.78rem',
+            background: classroom.backgroundImage ? '#e3f2fd' : btnBackground,
+            borderColor: classroom.backgroundImage ? '#1565c0' : btnBorder,
+            color: classroom.backgroundImage ? '#0d47a1' : textDark,
+          }}
+          title={
+            classroom.backgroundImage
+              ? 'Click to disable the classroom background image'
+              : 'Click to enable the classroom background image (classroom-background.png)'
+          }
+          onClick={() => {
+            ctx.store.setBackgroundImage(
+              classroom.backgroundImage ? null : ASSET.background,
+            );
+            ctx.canvas.requestRepaint();
+          }}
+        >
+          {classroom.backgroundImage ? 'On' : 'Off'}
+        </button>
+
+        {sep}
+
+        {/* §14.5 — Grid color picker */}
+        <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>Grid Color:</span>
+        <div style={{ position: 'relative' }}>
+          <GridColorButton
+            open={colorPickerOpen}
+            currentColor={classroom.gridColor ?? null}
+            onClick={() => { setColorPickerOpen((v) => !v); }}
+          />
+          <GridColorPickerPopover
+            open={colorPickerOpen}
+            currentColor={classroom.gridColor ?? null}
+            onChange={handleGridColorChange}
+            onClose={handleColorPickerClose}
+          />
+        </div>
       </div>
     </div>
   );
@@ -511,19 +610,12 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
     padding: '10px 12px',
     marginBottom: 6,
     borderRadius: 6,
-    border: '1px solid #ccc',
-    background: '#e3f2fd',
+    border: `1px solid ${paletteItemBorder}`,
+    background: furnitureFillSingleDesk,
     cursor: 'grab',
     userSelect: 'none',
     fontSize: '0.85rem',
     fontWeight: 500,
-  };
-
-  const kindColors: Record<FurnitureKind, string> = {
-    single_desk: '#e3f2fd',
-    table: '#e8f5e9',
-    teacher_desk: '#fff3e0',
-    whiteboard: '#f3e5f5',
   };
 
   return (
@@ -531,8 +623,8 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
       style={{
         width: 160,
         padding: '10px 8px',
-        background: '#fafafa',
-        borderRight: '1px solid #ddd',
+        background: sidePanelBackground,
+        borderRight: `1px solid ${panelBorder}`,
         overflowY: 'auto',
       }}
     >
@@ -542,33 +634,55 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
           fontSize: '0.8rem',
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
-          color: '#555',
+          color: sidePanelHeaderText,
           marginBottom: 10,
         }}
       >
         Palette
       </div>
-      {PALETTE_ITEMS.map((item) => (
-        <div
-          key={item.kind}
-          draggable
-          onDragStart={(e) => {
-            handleDragStart(e, item.kind);
-          }}
-          style={{ ...itemStyle, background: kindColors[item.kind] }}
-          title={`Drag onto the grid to place a ${item.label}`}
-        >
-          {item.label}
-          <div style={{ fontSize: '0.7rem', color: '#888', fontWeight: 400 }}>
-            {item.w}×{item.h}
+      {PALETTE_ITEMS.map((item) => {
+        const assetUrl = furnitureAssetUrl(item.kind);
+        return (
+          <div
+            key={item.kind}
+            draggable
+            onDragStart={(e) => {
+              handleDragStart(e, item.kind);
+            }}
+            style={{
+              ...itemStyle,
+              background: furnitureFillByKind[item.kind] ?? furnitureFillSingleDesk,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+            title={`Drag onto the grid to place a ${item.label}`}
+          >
+            {/* §14.3 — Show the furniture image asset in the palette item when available */}
+            {assetUrl !== undefined && (
+              <img
+                src={assetUrl}
+                alt=""
+                aria-hidden="true"
+                width={24}
+                height={24}
+                style={{ objectFit: 'contain', borderRadius: 2, flexShrink: 0 }}
+              />
+            )}
+            <div>
+              {item.label}
+              <div style={{ fontSize: '0.7rem', color: textFainter, fontWeight: 400 }}>
+                {item.w}×{item.h}
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       <div
         style={{
           marginTop: 16,
           fontSize: '0.72rem',
-          color: '#999',
+          color: textPlaceholder,
           lineHeight: 1.4,
         }}
       >
@@ -587,26 +701,27 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
 // looks identical to the base-pass furniture)
 // ---------------------------------------------------------------------------
 
-/** Fill colour for each furniture kind — must mirror render.ts COLORS. */
+/** Fill colour for each furniture kind — sourced from colors.ts (mirrors render.ts). */
 function kindFillColor(kind: FurnitureKind): string {
   switch (kind) {
-    case 'single_desk':   return '#e3f2fd';
-    case 'table':         return '#e8f5e9';
-    case 'teacher_desk':  return '#fff3e0';
-    case 'whiteboard':    return '#f3e5f5';
+    case 'single_desk':   return furnitureFillSingleDesk;
+    case 'table':         return furnitureFillTable;
+    case 'teacher_desk':  return furnitureFillTeacherDesk;
+    case 'whiteboard':    return furnitureFillWhiteboard;
   }
 }
 
-/** Stroke colour — mirrors render.ts strokeForFurniture logic. */
+/** Stroke colour — sourced from colors.ts, mirrors render.ts strokeForFurniture logic. */
 function kindStrokeColor(kind: FurnitureKind): string {
-  if (kind === 'teacher_desk' || kind === 'whiteboard') return '#b39ddb';
-  return '#90a4ae';
+  if (kind === 'teacher_desk' || kind === 'whiteboard') return furnitureStrokeFixture;
+  return furnitureStroke;
 }
 
 /**
  * Draw the furniture kind as a filled+stroked rectangle at pixel rect r.
- * This is the same visual as the base render pass so the preview is
- * indistinguishable from placed furniture.
+ * §14.3: uses the image asset for this kind when loaded (matches render.ts base pass).
+ * Falls back to the kind-color fill when the image is not yet loaded.
+ * This keeps the live-drag preview visually identical to placed furniture.
  */
 function paintFurnitureRect(
   ctx2d: CanvasRenderingContext2D,
@@ -616,8 +731,18 @@ function paintFurnitureRect(
 ): void {
   ctx2d.save();
   ctx2d.globalAlpha = alpha;
-  ctx2d.fillStyle = kindFillColor(kind);
-  ctx2d.fillRect(r.x, r.y, r.w, r.h);
+
+  // §14.3 — Use image if loaded, else color fallback
+  const assetUrl = furnitureAssetUrl(kind);
+  const img = assetUrl !== undefined ? getImage(assetUrl) : undefined;
+
+  if (img !== undefined) {
+    ctx2d.drawImage(img, r.x, r.y, r.w, r.h);
+  } else {
+    ctx2d.fillStyle = kindFillColor(kind);
+    ctx2d.fillRect(r.x, r.y, r.w, r.h);
+  }
+
   ctx2d.strokeStyle = kindStrokeColor(kind);
   ctx2d.lineWidth = 1.5;
   ctx2d.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
@@ -635,7 +760,7 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
   // selectedRect is kept in sync with the selected furniture by the pointer/drop handlers.
   // paintOverlay draws only from this pre-computed rect so no store access is needed here.
   if (selectedId !== null && dragState === null && selectedRect !== null) {
-    ctx2d.strokeStyle = 'rgba(25, 118, 210, 0.9)';
+    ctx2d.strokeStyle = selectionStroke;
     ctx2d.lineWidth = 2.5;
     ctx2d.setLineDash([5, 3]);
     ctx2d.strokeRect(
@@ -666,7 +791,7 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
     };
     if (origR.x !== r.x || origR.y !== r.y) {
       // Draw the original position faded out to show the "source"
-      ctx2d.fillStyle = 'rgba(240, 240, 240, 0.65)';
+      ctx2d.fillStyle = gridDragOriginFade;
       ctx2d.fillRect(origR.x, origR.y, origR.w, origR.h);
     }
 
@@ -675,13 +800,13 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
 
     // Validity tint — overlay to signal valid/invalid drop position
     if (valid) {
-      ctx2d.strokeStyle = 'rgba(25, 118, 210, 0.9)';
+      ctx2d.strokeStyle = gridDragValidStroke;
       ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     } else {
-      ctx2d.fillStyle = 'rgba(211, 47, 47, 0.30)';
+      ctx2d.fillStyle = gridDragInvalidFill;
       ctx2d.fillRect(r.x, r.y, r.w, r.h);
-      ctx2d.strokeStyle = 'rgba(211, 47, 47, 0.9)';
+      ctx2d.strokeStyle = gridDragInvalidStroke;
       ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
@@ -705,13 +830,13 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
 
     // Validity tint
     if (valid) {
-      ctx2d.strokeStyle = 'rgba(25, 118, 210, 0.85)';
+      ctx2d.strokeStyle = dragPreviewValidStroke;
       ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     } else {
-      ctx2d.fillStyle = 'rgba(211, 47, 47, 0.28)';
+      ctx2d.fillStyle = dragPreviewInvalidFill;
       ctx2d.fillRect(r.x, r.y, r.w, r.h);
-      ctx2d.strokeStyle = 'rgba(211, 47, 47, 0.85)';
+      ctx2d.strokeStyle = dragPreviewInvalidStroke;
       ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
@@ -719,7 +844,7 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
 
   // --- Drop collision flash ---
   if (dropCollisionFlash && selectedRect !== null) {
-    ctx2d.fillStyle = 'rgba(211, 47, 47, 0.25)';
+    ctx2d.fillStyle = dropCollisionFlashFill;
     ctx2d.fillRect(selectedRect.x, selectedRect.y, selectedRect.w, selectedRect.h);
   }
 

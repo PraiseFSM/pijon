@@ -46,6 +46,22 @@ export interface Classroom {
    * Storing in units means the threshold is stable when granularity changes.
    */
   readonly thresholdUnits: number;
+  /**
+   * §14.4 — Optional classroom background image URL.
+   * When set, the background image is drawn behind grid lines and furniture.
+   * Default null = no background image (current plain-white appearance preserved).
+   * The URL should reference a same-origin public/ asset (e.g. from ASSET.background).
+   * Persisted in the project file (ClassroomGeometrySchema).
+   */
+  readonly backgroundImage?: string | null;
+  /**
+   * §14.5 — Optional grid line color override.
+   * When set, overrides the default `gridLine` token from colors.ts.
+   * Default null = use the theme default (current appearance preserved).
+   * Any valid CSS color string is accepted.
+   * Persisted in the project file (ClassroomGeometrySchema).
+   */
+  readonly gridColor?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,7 +81,32 @@ export function makeClassroom(
   cellsPerUnit: number = DEFAULT_CELLS_PER_UNIT,
   thresholdUnits: number = DEFAULT_THRESHOLD_UNITS,
 ): Classroom {
-  return { id, name, gridW, gridH, furniture: [], cellsPerUnit, thresholdUnits };
+  return { id, name, gridW, gridH, furniture: [], cellsPerUnit, thresholdUnits, backgroundImage: null, gridColor: null };
+}
+
+/**
+ * §14.4 — Return a new Classroom with `backgroundImage` set to `url`.
+ * Pass null to clear the background image (restores plain-color appearance).
+ * This is an opt-in setting — existing classrooms have backgroundImage: null.
+ */
+export function setBackgroundImage(c: Classroom, url: string | null): Classroom {
+  if (c.backgroundImage === url) return c;
+  return { ...c, backgroundImage: url };
+}
+
+/**
+ * §14.5 — Return a new Classroom with `gridColor` set to `color`.
+ * Pass null to restore the theme default (gridLine token from colors.ts).
+ * Any valid CSS color string is accepted (hex, rgb, hsl, named colors).
+ * This is an opt-in setting — existing classrooms have gridColor: null.
+ *
+ * Same-reference short-circuit: returns `c` unchanged when the color is
+ * already set to the requested value, enabling React's referential equality
+ * checks to skip unnecessary re-renders and canvas repaints.
+ */
+export function setGridColor(c: Classroom, color: string | null): Classroom {
+  if (c.gridColor === color) return c;
+  return { ...c, gridColor: color };
 }
 
 // ---------------------------------------------------------------------------

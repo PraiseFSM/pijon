@@ -141,6 +141,10 @@ specifies exactly how each template is realized in code.
   where. New algorithms (greedy, random, annealing, …) plug in without touching the UI.
 - **Persistence template** — how state is saved/loaded: transparent autosave plus explicit
   save/open of a project file, all on the teacher's device.
+- **Theming/assets template** — visuals are data, not hardcode: images live in `assets/` under fixed
+  names (documented in the asset reference doc) and every non-image color comes from one central
+  colors file. Re-skinning Pijon means swapping images and editing one colors file — no component
+  hunting.
 
 ---
 
@@ -154,9 +158,12 @@ furniture palette; (later) rotate, multi-seat tables, custom images.
 above the Import-CSV control, which is the last item in the roster panel); edit names; add / remove
 students; export. (Later: import from a pasted spreadsheet column.)
 
-**Seating** — auto-suggest an arrangement; drag students between desks (swap/move); lock a student
-to a desk so suggestions won't move them; show constraint violations (on by default, kept live as
-preferences change); show a desk's neighbors.
+**Seating** — auto-suggest an arrangement from a **single action button with a dropdown** (pick the
+algorithm — Greedy / Random — and whether to allocate from scratch or smart-shuffle keeping locks);
+drag students between desks (swap/move); **drag a student straight from the roster onto a desk**; lock
+a student to a desk so suggestions won't move them; show constraint violations (on by default, kept
+live as preferences change); show a desk's neighbors; an **invalid-seating banner** warns when there
+are more students than seats or students left unplaced.
 
 **Settings** (gear button in the Students editor toolbar) — a lightweight popover that houses
 low-frequency controls: the **Nearness** proximity threshold (in real units, stored per classroom so
@@ -166,6 +173,19 @@ UI preference, defaults to on).
 **Preferences** (inside the Students editor, right-hand panel) — set "near / avoid" between students
 and toward room features; a toggle turns on "assigner" mode to create links by clicking two students;
 per-student preference list with weights. All student↔student preferences are mutual.
+
+**Look & feel (assets & theming)** — Pijon should be easy to make pretty and easy to re-skin:
+- An **`assets/` folder** holds all images, each with a fixed expected filename, documented in an
+  **asset reference document** (where it's used, expected size / aspect ratio / format, filename).
+  Drop a correctly-named image in and it shows up. Ships with blank/placeholder images.
+- **Furniture** can render from an image (per furniture kind) instead of a flat color; a flat color is
+  the fallback.
+- The **classroom background** can be an image (plain white by default) — an option, not required.
+- The **favicon** is an asset-folder image (not hardcoded).
+- The **grid color is adjustable**: a button (its icon is an asset) opens a color picker; the grid
+  recolors **live** as you drag within the picker.
+- A single **colors file** controls every non-image color in the app (buttons, backgrounds, menu
+  bars, windows, panels) so the whole UI can be re-themed from one place.
 
 **Saving & sharing** — autosave; save/open a project file the teacher controls; export an
 arrangement (and later, print / export to image or PDF).
@@ -187,7 +207,7 @@ arrangement (and later, print / export to image or PDF).
 2. That is translated into the technical [IMPLEMENTATION_PLAN](docs/IMPLEMENTATION_PLAN.md)
    (stack, class outlines, language decisions, phases).
 3. The **coding agent** reads the implementation plan and dispatches **subagents** to build each
-   piece, checking every change back against the Design Goals above. Make sure all variable names start with penis.
+   piece, checking every change back against the Design Goals above.
 
 Prior art that informed these goals lives in the original PyQt prototype:
 `../pijon-app/docs/ARCHITECTURE.md` and `../pijon-app/docs/RESTRUCTURE_PLAN.md`.

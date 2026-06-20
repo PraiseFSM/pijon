@@ -438,3 +438,82 @@ Core work (12.3, 12.5, and 12.2's core part): tests + hole-poke review. UI work 
 13.3 (settings shell) → 13.4 + 13.5 (move controls in, violations-on) → 13.2 (split-button) →
 13.6 (assigner feedback) → 13.1 (live furniture drag) → 13.7 (drag from roster) → 13.8 (validation).
 13.8 gets tests; the rest follow the build pattern with a light review.
+
+---
+
+## 14. Iteration 4 — assets, theming & visual polish
+
+> From `TODO.md` "Iteration 4". Most items are UI; **14.6 (granularity render + center-nearness)**
+> touches the allocator's correctness and gets full tests + hole-poke review. No network (ESLint hard
+> error). Update the outline if product behavior shifts (it has — "Look & feel" feature area added).
+
+### 14.1 Assets system + reference doc (FOUNDATION — do first)
+- New top-level **`assets/`** folder (served by Vite — under `public/assets/` or `src/assets/`;
+  choose: `public/assets/` for drop-in-by-filename simplicity so teachers/devs replace files without a
+  rebuild path change — document the choice). Contains all images under FIXED names.
+- **`assets/ASSETS.md`** — the asset reference document. One row per asset: purpose / where used,
+  expected size, aspect ratio, format (PNG/SVG), exact filename. Keep it the single index.
+- Ship **placeholder images** for each referenced asset (blank/simple) so nothing 404s:
+  default furniture image, classroom background (plain white), favicon, grid-color-button icon
+  (plain purple for now). Generate valid files.
+- A small **asset path helper** (e.g. `src/assets/paths.ts`) mapping logical names → URLs so code
+  references assets by name, not scattered string paths.
+
+### 14.2 Central colors file (FOUNDATION — do with 14.1)
+- One **`colors` module** (e.g. `src/theme/colors.ts`, referenced from `assets/` per the outline —
+  decide location, document it) that defines EVERY non-image color: buttons, backgrounds, menu bars,
+  windows, panels, toolbar, grid lines (default), text, banner colors, etc.
+- Refactor existing inline-styled components (StudentEditor, FurnitureEditor, shell, SettingsMenu,
+  banners) to pull colors from this module. Cross-cutting but mechanical. Goal: re-theme from one file.
+
+### 14.3 Furniture images
+- Furniture renders from an image asset (per `FurnitureKind`) when one exists, else the flat
+  kind-color fallback (current behavior). Wire into `render.ts` base pass + the live-drag preview
+  (§13.1) + the palette item. Images come from `assets/` via the path helper. Cache loaded `Image`s.
+
+### 14.4 Classroom background image
+- Optional background image behind the grid (default the plain-white placeholder). Drawn first in
+  `render.ts` (under grid lines + furniture). Make it a setting (per-classroom or app-level — choose;
+  per-classroom is more flexible and persists in the project file). "Option, not required."
+
+### 14.5 Adjustable grid color + color picker
+- A toolbar/settings **button whose icon is an asset** (plain purple placeholder) opens a **color
+  picker popover**. Picking a color updates the grid line color **live as the user drags** within the
+  picker (continuous `onChange`, not just on commit). Persist `gridColor` per classroom (project file)
+  so it survives reload; default from the colors file. Be creative but keep it simple and on-brand.
+  Reuse the click-outside popover pattern (§12.1/§13.3).
+
+### 14.6 Granularity render density + center-based nearness (CORE — full tests + review)
+- Increasing granularity `G` (from §12.3) must make the grid render **denser squares** while
+  furniture keeps the SAME physical size: e.g. a 1×1-at-G=1 desk looks like 2×2 cells at G=2 but is
+  not physically larger. Concretely, the canvas must keep the board's physical size constant across G
+  — i.e. **pixels-per-fine-cell scales as `baseCellSize / cellsPerUnit`** (more, smaller squares),
+  rather than the board growing. Verify `render.ts`/`ClassroomCanvas` cellSize derivation does this.
+- **Nearness is always computed from the CENTER of each furniture** (center-to-center distance),
+  independent of granularity, with the threshold in real units (§12.3). This is the easy-to-get-wrong
+  part: confirm `furniture_distance` uses `pos + size/2` centers in fine-cell space and the
+  unit→cell threshold conversion holds, so a pure granularity change NEVER changes neighbor sets.
+- TESTS (mandatory, this is the trap): center-of-furniture distance correctness for odd/even sizes;
+  neighbor sets identical across G=1/2/3 for the same physical layout; greedy allocation identical
+  across a pure granularity change under a fixed RNG seed; rendering cellSize derivation keeps board
+  size constant. Hole-poke review required.
+
+### 14.7 Resize buttons → in-grid "ghost ring" (UI — get it right)
+- Replace the current toolbar +/- resize controls with controls **on the grid**, in Furniture editor
+  mode only, rendered as a lighter "ghost ring" of squares around the grid's perimeter:
+  - For each edge (top/bottom/left/right): a **plus button OUTSIDE the grid**, centered on that edge,
+    sitting in the ghost square where a new row/column would appear (clicking adds a row/col there).
+  - A **minus button INSIDE the grid**, centered on the edge row/column that would be removed
+    (clicking removes that row/col — still blocked if occupied, per §12.3's `resizeGrid` result;
+    surface the blocked reason).
+  - Example (3×3): top-edge → a minus button on the top-center cell; a plus button one cell ABOVE the
+    grid at top-center. Mirror for all four edges.
+  - Ghost ring squares are a lighter/translucent color (from the colors file). Hit-testing for these
+    buttons is part of the FurnitureEditor (pointer handling + paintOverlay), not the toolbar.
+  - This is a UI-precision item — if any layout detail is ambiguous during build, ASK before guessing.
+
+### Suggested order
+14.1 + 14.2 (assets + colors foundation) → 14.3 (furniture images) → 14.4 (background) →
+14.5 (grid color picker) → 14.7 (ghost-ring resize) → 14.6 (granularity render + center-nearness, CORE).
+14.6 gets full tests + hole-poke; 14.2 (cross-cutting refactor) and 14.7 (UI precision) get a review;
+the rest follow the build pattern.

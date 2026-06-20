@@ -10,6 +10,17 @@
 
 import { usePijonStore } from '../../state/store.js';
 import type { EditorMode } from '../editors/EditorMode.js';
+import {
+  shellBackground,
+  panelBorder,
+  logoText,
+  tabActiveBackground,
+  tabActiveBorder,
+  tabActiveText,
+  tabInactiveBackground,
+  tabInactiveBorder,
+  tabInactiveText,
+} from '../../theme/colors.js';
 
 export interface EditorSwitcherProps {
   /** Ordered list of available editors from registry.ts. */
@@ -26,8 +37,8 @@ export function EditorSwitcher({ editors }: EditorSwitcherProps) {
         alignItems: 'center',
         gap: 2,
         padding: '6px 10px',
-        background: '#fff',
-        borderBottom: '1px solid #ddd',
+        background: shellBackground,
+        borderBottom: `1px solid ${panelBorder}`,
       }}
       role="tablist"
       aria-label="Editor tools"
@@ -36,7 +47,7 @@ export function EditorSwitcher({ editors }: EditorSwitcherProps) {
         style={{
           fontWeight: 700,
           fontSize: '0.9rem',
-          color: '#1565c0',
+          color: logoText,
           marginRight: 10,
           letterSpacing: '-0.01em',
         }}
@@ -56,9 +67,9 @@ export function EditorSwitcher({ editors }: EditorSwitcherProps) {
             style={{
               padding: '5px 16px',
               borderRadius: 5,
-              border: isActive ? '2px solid #1565c0' : '1px solid #ccc',
-              background: isActive ? '#e3f2fd' : '#fff',
-              color: isActive ? '#0d47a1' : '#444',
+              border: isActive ? `2px solid ${tabActiveBorder}` : `1px solid ${tabInactiveBorder}`,
+              background: isActive ? tabActiveBackground : tabInactiveBackground,
+              color: isActive ? tabActiveText : tabInactiveText,
               fontWeight: isActive ? 700 : 400,
               cursor: 'pointer',
               fontSize: '0.875rem',

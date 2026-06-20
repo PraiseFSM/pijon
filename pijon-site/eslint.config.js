@@ -116,6 +116,16 @@ export default tseslint.config(
       // Tests sometimes check conditions that TypeScript can statically resolve —
       // acceptable in test assertions where clarity beats brevity.
       '@typescript-eslint/no-unnecessary-condition': 'off',
+      // Mock/stub idioms: async functions that conform to an interface without
+      // actually awaiting; empty mock bodies; values typed `any` coming out of
+      // fake-indexeddb / DOM mocks; numbers/handles in assertion message strings;
+      // and exercising APIs flagged as deprecated. All are normal in test doubles
+      // and don't affect production code (network rules above STILL apply to tests).
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/no-empty-function': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/restrict-template-expressions': 'off',
+      '@typescript-eslint/no-deprecated': 'off',
     },
   },
 );
