@@ -41,10 +41,10 @@ import { furnitureId } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
 import { occupiedCells } from '../../domain/furniture.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
+import { resizeButtonRects, hitButton, ghostRingCells, type ResizeButton } from '../canvas/ghostRing.js';
 import { getImage } from '../canvas/imageCache.js';
 import { furnitureAssetUrl, ASSET } from '../../assets/paths.js';
 import { makeClassroom } from '../../domain/classroom.js';
-import type { GridEdge } from '../../domain/classroom.js';
 import { GridColorButton, GridColorPickerPopover } from './GridColorPicker.js';
 import {
   toolbarBackground,
@@ -80,6 +80,16 @@ import {
   furnitureFillWhiteboard,
   furnitureStroke,
   furnitureStrokeFixture,
+  ghostRingCellFill,
+  ghostRingCellStroke,
+  ghostRingPlusButtonFill,
+  ghostRingPlusButtonStroke,
+  ghostRingPlusButtonText,
+  ghostRingPlusButtonHoverFill,
+  ghostRingMinusButtonFill,
+  ghostRingMinusButtonStroke,
+  ghostRingMinusButtonText,
+  ghostRingMinusButtonHoverFill,
 } from '../../theme/colors.js';
 
 // ---------------------------------------------------------------------------
@@ -121,13 +131,20 @@ const PALETTE_ITEMS: readonly KindMeta[] = [
   { kind: 'whiteboard',  label: 'Whiteboard', w: 4, h: 1 },
 ];
 
-/** Build a Furniture record for a given kind at position (0,0).
- *  The caller moves it to the correct position after creation.
- *  numSeats is only set for 'table' (the only kind where it's meaningful). */
-function makeFurniture(kind: FurnitureKind, pos: Vec2): Furniture {
+/**
+ * Build a Furniture record for a given kind at position `pos`.
+ *
+ * `cellsPerUnit` (G) is the current grid granularity.  Palette items store
+ * their dimensions in UNITS (1×1, 2×2 etc.); multiplying by G gives the
+ * fine-cell dimensions that match the classroom's coordinate space.
+ *
+ * At G=1 this is a no-op (w_units × 1 = w_units).  At G=2 a 1×1 desk
+ * becomes 2×2 fine cells so its physical size is unchanged.
+ */
+function makeFurniture(kind: FurnitureKind, pos: Vec2, cellsPerUnit = 1): Furniture {
   const meta = PALETTE_ITEMS.find((m) => m.kind === kind);
-  const w = meta?.w ?? 1;
-  const h = meta?.h ?? 1;
+  const w = (meta?.w ?? 1) * cellsPerUnit;
+  const h = (meta?.h ?? 1) * cellsPerUnit;
   const base: Furniture = {
     id: furnitureId(crypto.randomUUID()),
     kind,
@@ -254,6 +271,13 @@ let dragState: {
 /** True when the last drop from the palette had a collision (flash highlight). */
 let dropCollisionFlash = false;
 
+/**
+ * §14.7 — The ghost-ring resize button the pointer is currently hovering over,
+ * or null when not hovering any button.  Used by paintOverlay to draw the
+ * hover highlight without a re-render.
+ */
+let hoveredButton: ResizeButton | null = null;
+
 /** requestRepaint reference captured on activate so paintOverlay triggers can call it. */
 let repaintFn: (() => void) | null = null;
 
@@ -265,10 +289,17 @@ let repaintFn: (() => void) | null = null;
  * When the teacher drags a palette item over the grid (HTML5 dragover), we paint
  * a live preview of the to-be-placed furniture at the hovered cell.
  * Cleared on dragend / drop / dragleave.
+ *
+ * `w` and `h` are stored in FINE CELLS (already scaled by cellsPerUnit) so that
+ * paintOverlay can draw the correct size without needing classroom state.
  */
 let paletteDragPreview: {
   kind: FurnitureKind;
   previewPos: Vec2;
+  /** Width in fine cells (= unitW × cellsPerUnit). */
+  w: number;
+  /** Height in fine cells (= unitH × cellsPerUnit). */
+  h: number;
   /** True = fits (no collision, in bounds); False = red warning. */
   valid: boolean;
 } | null = null;
@@ -290,7 +321,32 @@ let paletteDragPreview: {
 const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const warning = ctx.store.resizeGridWarning;
   const classroom = ctx.store.classroom;
+
+  /**
+   * §polish Fix 3 — keep granularityInput in sync with store.
+   *
+   * We store both the input value AND the last store value we initialized from.
+   * On each render, if the store's cellsPerUnit has changed since we last synced
+   * (indicating an external update like a project hydrate), we derive a fresh
+   * input value directly from the store rather than running an effect.
+   *
+   * This is the "derived state" pattern: avoids useEffect+setState which ESLint
+   * flags as `react-hooks/set-state-in-effect` (cascading renders).
+   */
+  const [syncedCellsPerUnit, setSyncedCellsPerUnit] = useState(classroom.cellsPerUnit);
   const [granularityInput, setGranularityInput] = useState(classroom.cellsPerUnit);
+
+  if (classroom.cellsPerUnit !== syncedCellsPerUnit) {
+    // The store changed externally (hydrate, file open, etc.) — reset the input.
+    setSyncedCellsPerUnit(classroom.cellsPerUnit);
+    setGranularityInput(classroom.cellsPerUnit);
+  }
+
+  /**
+   * §polish Fix 2 — non-blocking granularity error banner.
+   * Set when the user tries to apply an invalid granularity; cleared on success.
+   */
+  const [granularityWarning, setGranularityWarning] = useState<string | null>(null);
   /** §14.5 — grid color picker open state */
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
 
@@ -327,11 +383,6 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     void ctx.persistence.openFromFile();
   };
 
-  const handleResize = (edge: GridEdge, delta: number) => {
-    ctx.store.resizeGrid(edge, delta);
-    ctx.canvas.requestRepaint();
-  };
-
   const handleGranularityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseInt(e.target.value, 10);
     if (!Number.isFinite(v) || v < 1) return;
@@ -342,9 +393,19 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     if (granularityInput === classroom.cellsPerUnit) return;
     try {
       ctx.store.setGranularity(granularityInput);
+      // Clear any prior granularity warning on success
+      setGranularityWarning(null);
       ctx.canvas.requestRepaint();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      // §polish Fix 2 — surface a friendly, non-blocking banner instead of alert().
+      // The domain setGranularity throws RangeError when the grid dimensions don't
+      // divide evenly by the requested granularity.
+      const msg =
+        err instanceof Error
+          ? err.message
+          : `Can't set granularity to ${granularityInput.toString()} — please try a value that divides the grid evenly.`;
+      setGranularityWarning(msg);
+      // Reset the input to the currently-active granularity
       setGranularityInput(classroom.cellsPerUnit);
     }
   };
@@ -376,13 +437,6 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     lineHeight: '1.4',
   };
 
-  const btnSm: React.CSSProperties = {
-    ...btn,
-    padding: '2px 7px',
-    fontWeight: 700,
-    minWidth: 24,
-  };
-
   const sep = (
     <span style={{ borderLeft: '1px solid #ddd', height: 20, margin: '0 4px', display: 'inline-block' }} />
   );
@@ -396,7 +450,7 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         borderBottom: `1px solid ${toolbarBorder}`,
       }}
     >
-      {/* Warning banner */}
+      {/* Resize grid warning banner */}
       {warning !== null && (
         <div
           style={{
@@ -414,6 +468,31 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           <button
             type="button"
             onClick={() => { ctx.store.dismissResizeWarning(); }}
+            style={{ ...btn, padding: '1px 7px', fontSize: '0.74rem', color: bannerWarningText, borderColor: bannerWarningButtonBorder }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* §polish Fix 2 — Granularity warning banner (non-blocking, dismissable) */}
+      {granularityWarning !== null && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '4px 10px',
+            background: bannerWarningBackground,
+            borderBottom: `1px solid ${bannerWarningBorder}`,
+            fontSize: '0.78rem',
+            color: bannerWarningText,
+          }}
+        >
+          <span style={{ flex: 1 }}>⚠ {granularityWarning}</span>
+          <button
+            type="button"
+            onClick={() => { setGranularityWarning(null); }}
             style={{ ...btn, padding: '1px 7px', fontSize: '0.74rem', color: bannerWarningText, borderColor: bannerWarningButtonBorder }}
           >
             ✕
@@ -439,66 +518,13 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 
         {sep}
 
-        {/* Grid resize controls */}
+        {/* §14.7 — Grid size readout (resize controls moved to in-grid ghost ring) */}
         <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>Grid:</span>
-
-        {/* Top/Bottom rows */}
-        <span style={{ fontSize: '0.72rem', color: textFainter }}>Rows</span>
-        <button
-          style={btnSm}
-          type="button"
-          title="Add a row at the top (shifts furniture down)"
-          onClick={() => { handleResize('top', 1); }}
-        >+T</button>
-        <button
-          style={btnSm}
-          type="button"
-          title="Remove a row from the top"
-          onClick={() => { handleResize('top', -1); }}
-        >−T</button>
-        <button
-          style={btnSm}
-          type="button"
-          title="Add a row at the bottom"
-          onClick={() => { handleResize('bottom', 1); }}
-        >+B</button>
-        <button
-          style={btnSm}
-          type="button"
-          title="Remove a row from the bottom"
-          onClick={() => { handleResize('bottom', -1); }}
-        >−B</button>
-
-        {/* Left/Right cols */}
-        <span style={{ fontSize: '0.72rem', color: textFainter, marginLeft: 4 }}>Cols</span>
-        <button
-          style={btnSm}
-          type="button"
-          title="Add a column at the left (shifts furniture right)"
-          onClick={() => { handleResize('left', 1); }}
-        >+L</button>
-        <button
-          style={btnSm}
-          type="button"
-          title="Remove a column from the left"
-          onClick={() => { handleResize('left', -1); }}
-        >−L</button>
-        <button
-          style={btnSm}
-          type="button"
-          title="Add a column at the right"
-          onClick={() => { handleResize('right', 1); }}
-        >+R</button>
-        <button
-          style={btnSm}
-          type="button"
-          title="Remove a column from the right"
-          onClick={() => { handleResize('right', -1); }}
-        >−R</button>
-
-        {/* Grid size readout */}
-        <span style={{ fontSize: '0.72rem', color: textFaint, marginLeft: 4 }}>
-          ({classroom.gridW}×{classroom.gridH})
+        <span
+          style={{ fontSize: '0.78rem', color: textFaint, marginLeft: 2 }}
+          title="Use the +/− buttons on the grid edges to resize"
+        >
+          {classroom.gridW}×{classroom.gridH}
         </span>
 
         {sep}
@@ -756,6 +782,63 @@ function paintFurnitureRect(
 function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
   ctx2d.save();
 
+  // §14.7 — Draw the ghost ring BEFORE the grid-coordinate content so it
+  // is drawn in canvas space (no translate needed — rects are already in
+  // canvas pixel coords from resizeButtonRects/ghostRingCells).
+  if (view.originOffset > 0) {
+    const cs = view.cellSize;
+
+    // --- Ghost ring cells (lighter translucent squares around the grid) ---
+    const ringCells = ghostRingCells(view.gridW, view.gridH, view.originOffset);
+    ctx2d.fillStyle = ghostRingCellFill;
+    ctx2d.strokeStyle = ghostRingCellStroke;
+    ctx2d.lineWidth = 0.5;
+    for (const { col, row } of ringCells) {
+      const rx = col * cs;
+      const ry = row * cs;
+      ctx2d.fillRect(rx, ry, cs, cs);
+      ctx2d.strokeRect(rx + 0.25, ry + 0.25, cs - 0.5, cs - 0.5);
+    }
+
+    // --- Resize buttons (PLUS outside, MINUS inside) ---
+    const buttons = resizeButtonRects(view.gridW, view.gridH, cs, view.originOffset);
+
+    ctx2d.textAlign = 'center';
+    ctx2d.textBaseline = 'middle';
+
+    for (const btn of buttons) {
+      const isHovered = hoveredButton !== null
+        && hoveredButton.edge === btn.edge
+        && hoveredButton.sign === btn.sign;
+
+      if (btn.sign === 1) {
+        // PLUS button — outside grid
+        ctx2d.fillStyle = isHovered ? ghostRingPlusButtonHoverFill : ghostRingPlusButtonFill;
+        ctx2d.strokeStyle = ghostRingPlusButtonStroke;
+      } else {
+        // MINUS button — inside grid, edge row/col
+        ctx2d.fillStyle = isHovered ? ghostRingMinusButtonHoverFill : ghostRingMinusButtonFill;
+        ctx2d.strokeStyle = ghostRingMinusButtonStroke;
+      }
+      ctx2d.lineWidth = 1;
+      ctx2d.fillRect(btn.x + 1, btn.y + 1, btn.w - 2, btn.h - 2);
+      ctx2d.strokeRect(btn.x + 1.5, btn.y + 1.5, btn.w - 3, btn.h - 3);
+
+      // Label (± sign)
+      const label = btn.sign === 1 ? '+' : '−';
+      const fontSize = Math.max(10, Math.min(18, cs * 0.38));
+      ctx2d.font = `bold ${fontSize.toString()}px sans-serif`;
+      ctx2d.fillStyle = btn.sign === 1 ? ghostRingPlusButtonText : ghostRingMinusButtonText;
+      ctx2d.fillText(label, btn.x + btn.w / 2, btn.y + btn.h / 2);
+    }
+  }
+
+  // Translate so that all grid-coordinate drawing (selectedRect, drag previews)
+  // maps correctly when originOffset > 0. selectedRect and drag pixel rects are
+  // stored in canvas pixel space (they already include the origin offset), so
+  // no further adjustment is needed inside this translated block — they work as-is.
+  // We do NOT translate here; instead selectedRect includes the offset already.
+
   // --- Selection highlight ---
   // selectedRect is kept in sync with the selected furniture by the pointer/drop handlers.
   // paintOverlay draws only from this pre-computed rect so no store access is needed here.
@@ -775,17 +858,18 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
   // --- §13.1 Drag preview — real-time furniture (not a ghost outline) ---
   if (dragState !== null) {
     const { furniture: f, previewPos, valid } = dragState;
+    const originPx = view.originOffset * view.cellSize;
     const r = {
-      x: previewPos.x * view.cellSize,
-      y: previewPos.y * view.cellSize,
+      x: previewPos.x * view.cellSize + originPx,
+      y: previewPos.y * view.cellSize + originPx,
       w: f.w * view.cellSize,
       h: f.h * view.cellSize,
     };
 
     // Ghost/dim the original spot so the teacher can see it was moved
     const origR = {
-      x: f.pos.x * view.cellSize,
-      y: f.pos.y * view.cellSize,
+      x: f.pos.x * view.cellSize + originPx,
+      y: f.pos.y * view.cellSize + originPx,
       w: f.w * view.cellSize,
       h: f.h * view.cellSize,
     };
@@ -814,13 +898,12 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
 
   // --- §13.1 Palette drag-over live preview ---
   if (paletteDragPreview !== null) {
-    const { kind, previewPos, valid } = paletteDragPreview;
-    const meta = PALETTE_ITEMS.find((m) => m.kind === kind);
-    const w = meta?.w ?? 1;
-    const h = meta?.h ?? 1;
+    // w and h are already in fine cells (scaled by cellsPerUnit when stored).
+    const { kind, previewPos, valid, w, h } = paletteDragPreview;
+    const originPx = view.originOffset * view.cellSize;
     const r = {
-      x: previewPos.x * view.cellSize,
-      y: previewPos.y * view.cellSize,
+      x: previewPos.x * view.cellSize + originPx,
+      y: previewPos.y * view.cellSize + originPx,
       w: w * view.cellSize,
       h: h * view.cellSize,
     };
@@ -864,7 +947,14 @@ function syncSelectedRect(furniture: Furniture | undefined, view: CanvasView): v
     selectedRect = null;
     return;
   }
-  selectedRect = furnitureToPixelRect(furniture, view.cellSize);
+  const baseRect = furnitureToPixelRect(furniture, view.cellSize);
+  const originPx = view.originOffset * view.cellSize;
+  selectedRect = {
+    x: baseRect.x + originPx,
+    y: baseRect.y + originPx,
+    w: baseRect.w,
+    h: baseRect.h,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -887,6 +977,7 @@ export const FurnitureEditor: EditorMode = {
     dragState = null;
     dropCollisionFlash = false;
     paletteDragPreview = null;
+    hoveredButton = null;
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -896,6 +987,7 @@ export const FurnitureEditor: EditorMode = {
     dragState = null;
     dropCollisionFlash = false;
     paletteDragPreview = null;
+    hoveredButton = null;
     // Clear the cross-browser drag kind stash — important if the teacher switches
     // editors mid-drag (unlikely but guards against any stale state).
     clearDraggedKindStash();
@@ -906,6 +998,38 @@ export const FurnitureEditor: EditorMode = {
 
   onPointerDown(e: PointerEvent, ctx: EditorContext): void {
     if (e.button !== 0) return;
+
+    // §14.7 — Check ghost-ring resize buttons BEFORE normal place/select logic.
+    // Convert client coords → canvas-pixel coords for button hit-testing.
+    if (ctx.canvas.originOffset > 0) {
+      // Defensively check if target has getBoundingClientRect (works in DOM and
+      // in test environments that pass a plain object with that method).
+      const t = e.target;
+      const getRect =
+        t !== null &&
+        typeof t === 'object' &&
+        'getBoundingClientRect' in t &&
+        typeof (t as { getBoundingClientRect: unknown }).getBoundingClientRect === 'function'
+          ? (t as { getBoundingClientRect: () => { left: number; top: number } }).getBoundingClientRect
+          : null;
+      if (getRect !== null) {
+        const canvasRect = getRect.call(t);
+        const canvasPx = e.clientX - canvasRect.left;
+        const canvasPy = e.clientY - canvasRect.top;
+        const buttons = resizeButtonRects(
+          ctx.canvas.gridW,
+          ctx.canvas.gridH,
+          ctx.canvas.cellSize,
+          ctx.canvas.originOffset,
+        );
+        const hit = hitButton(canvasPx, canvasPy, buttons);
+        if (hit !== undefined) {
+          ctx.store.resizeGrid(hit.edge, hit.sign);
+          ctx.canvas.requestRepaint();
+          return; // consumed — do not proceed to normal drag/select
+        }
+      }
+    }
 
     const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
     if (cell === undefined) {
@@ -944,6 +1068,39 @@ export const FurnitureEditor: EditorMode = {
   },
 
   onPointerMove(e: PointerEvent, ctx: EditorContext): void {
+    // §14.7 — Track hovered ghost-ring button when NOT dragging furniture.
+    if (dragState === null && ctx.canvas.originOffset > 0) {
+      const tm = e.target;
+      const getMoveRect =
+        tm !== null &&
+        typeof tm === 'object' &&
+        'getBoundingClientRect' in tm &&
+        typeof (tm as { getBoundingClientRect: unknown }).getBoundingClientRect === 'function'
+          ? (tm as { getBoundingClientRect: () => { left: number; top: number } }).getBoundingClientRect
+          : null;
+      if (getMoveRect !== null) {
+        const canvasRect = getMoveRect.call(tm);
+        const canvasPx = e.clientX - canvasRect.left;
+        const canvasPy = e.clientY - canvasRect.top;
+        const buttons = resizeButtonRects(
+          ctx.canvas.gridW,
+          ctx.canvas.gridH,
+          ctx.canvas.cellSize,
+          ctx.canvas.originOffset,
+        );
+        const hit = hitButton(canvasPx, canvasPy, buttons) ?? null;
+        const prevHovered = hoveredButton;
+        hoveredButton = hit;
+        // Only repaint when hover state changed
+        if (
+          prevHovered?.edge !== hit?.edge ||
+          prevHovered?.sign !== hit?.sign
+        ) {
+          ctx.canvas.requestRepaint();
+        }
+      }
+    }
+
     if (dragState === null) return;
 
     const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
@@ -971,10 +1128,11 @@ export const FurnitureEditor: EditorMode = {
       moved: dragState.moved || moved,
     };
 
-    // Keep selection rect in sync with the preview
+    // Keep selection rect in sync with the preview (in canvas pixel space, with origin offset)
+    const previewOriginPx = ctx.canvas.originOffset * ctx.canvas.cellSize;
     selectedRect = {
-      x: newPos.x * ctx.canvas.cellSize,
-      y: newPos.y * ctx.canvas.cellSize,
+      x: newPos.x * ctx.canvas.cellSize + previewOriginPx,
+      y: newPos.y * ctx.canvas.cellSize + previewOriginPx,
       w: furniture.w * ctx.canvas.cellSize,
       h: furniture.h * ctx.canvas.cellSize,
     };
@@ -991,10 +1149,11 @@ export const FurnitureEditor: EditorMode = {
 
     if (moved && valid) {
       ctx.store.moveFurniture(furniture.id, previewPos);
-      // Update selectedRect to committed position
+      // Update selectedRect to committed position (canvas pixel space, with origin offset)
+      const commitOriginPx = ctx.canvas.originOffset * ctx.canvas.cellSize;
       selectedRect = {
-        x: previewPos.x * ctx.canvas.cellSize,
-        y: previewPos.y * ctx.canvas.cellSize,
+        x: previewPos.x * ctx.canvas.cellSize + commitOriginPx,
+        y: previewPos.y * ctx.canvas.cellSize + commitOriginPx,
         w: furniture.w * ctx.canvas.cellSize,
         h: furniture.h * ctx.canvas.cellSize,
       };
@@ -1049,20 +1208,29 @@ export const FurnitureEditor: EditorMode = {
     const meta = PALETTE_ITEMS.find((m) => m.kind === furnitureKind);
     if (meta === undefined) return;
 
+    // §14.6 — Scale palette unit-dimensions to fine cells.
+    // PALETTE_ITEMS stores dimensions in units; multiply by cellsPerUnit (G) so
+    // the placed furniture occupies the correct number of fine grid cells.
+    const G = ctx.store.classroom.cellsPerUnit;
+    const fw = meta.w * G;
+    const fh = meta.h * G;
+
     // Bounds check
-    if (!inBounds(cell, meta.w, meta.h, ctx.store.classroom.gridW, ctx.store.classroom.gridH)) {
+    if (!inBounds(cell, fw, fh, ctx.store.classroom.gridW, ctx.store.classroom.gridH)) {
       return;
     }
 
+    const dropOriginPx = ctx.canvas.originOffset * ctx.canvas.cellSize;
+
     // Collision check
-    if (hasCollision(cell, meta.w, meta.h, ctx.store.classroom.furniture)) {
+    if (hasCollision(cell, fw, fh, ctx.store.classroom.furniture)) {
       // Flash the target area red
       dropCollisionFlash = true;
       selectedRect = {
-        x: cell.x * ctx.canvas.cellSize,
-        y: cell.y * ctx.canvas.cellSize,
-        w: meta.w * ctx.canvas.cellSize,
-        h: meta.h * ctx.canvas.cellSize,
+        x: cell.x * ctx.canvas.cellSize + dropOriginPx,
+        y: cell.y * ctx.canvas.cellSize + dropOriginPx,
+        w: fw * ctx.canvas.cellSize,
+        h: fh * ctx.canvas.cellSize,
       };
       ctx.canvas.requestRepaint();
       setTimeout(() => {
@@ -1072,17 +1240,17 @@ export const FurnitureEditor: EditorMode = {
       return;
     }
 
-    // Create and add the furniture
-    const newFurniture = makeFurniture(furnitureKind, cell);
+    // Create and add the furniture (makeFurniture scales by G internally)
+    const newFurniture = makeFurniture(furnitureKind, cell, G);
     ctx.store.addFurniture(newFurniture);
 
     // Auto-select the newly placed piece
     selectedId = newFurniture.id;
     selectedRect = {
-      x: cell.x * ctx.canvas.cellSize,
-      y: cell.y * ctx.canvas.cellSize,
-      w: meta.w * ctx.canvas.cellSize,
-      h: meta.h * ctx.canvas.cellSize,
+      x: cell.x * ctx.canvas.cellSize + dropOriginPx,
+      y: cell.y * ctx.canvas.cellSize + dropOriginPx,
+      w: fw * ctx.canvas.cellSize,
+      h: fh * ctx.canvas.cellSize,
     };
     ctx.canvas.requestRepaint();
   },
@@ -1117,9 +1285,14 @@ export const FurnitureEditor: EditorMode = {
       return;
     }
 
+    // §14.6 — Scale palette unit-dimensions to fine cells.
+    const G = ctx.store.classroom.cellsPerUnit;
+    const fw = meta.w * G;
+    const fh = meta.h * G;
+
     const valid =
-      inBounds(cell, meta.w, meta.h, ctx.store.classroom.gridW, ctx.store.classroom.gridH) &&
-      !hasCollision(cell, meta.w, meta.h, ctx.store.classroom.furniture);
+      inBounds(cell, fw, fh, ctx.store.classroom.gridW, ctx.store.classroom.gridH) &&
+      !hasCollision(cell, fw, fh, ctx.store.classroom.furniture);
 
     // Update preview only if it changed (avoid unnecessary repaints)
     const prev = paletteDragPreview;
@@ -1127,9 +1300,11 @@ export const FurnitureEditor: EditorMode = {
       prev?.kind !== furnitureKind ||
       prev.previewPos.x !== cell.x ||
       prev.previewPos.y !== cell.y ||
+      prev.w !== fw ||
+      prev.h !== fh ||
       prev.valid !== valid;
     if (changed) {
-      paletteDragPreview = { kind: furnitureKind, previewPos: cell, valid };
+      paletteDragPreview = { kind: furnitureKind, previewPos: cell, w: fw, h: fh, valid };
       ctx.canvas.requestRepaint();
     }
   },
@@ -1162,6 +1337,13 @@ export const FurnitureEditor: EditorMode = {
 // ---------------------------------------------------------------------------
 
 export { FurnitureSidePanel as FurniturePalette };
+
+/**
+ * §14.6 — Exported alias for makeFurniture (with cellsPerUnit scaling).
+ * Tests import this to verify that new placements at G>1 get correct fine-cell
+ * dimensions. Internal code uses makeFurniture directly.
+ */
+export { makeFurniture as makeFurnitureForPalette };
 
 // Phase 9 note: if the shell needs to show the selected furniture id in a status bar,
 // read the module-level `selectedId` variable directly (it is not reactive). A proper

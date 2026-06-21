@@ -622,6 +622,7 @@ const makeCanvasMock = () => ({
   cellSize: 48,
   gridW: 5,
   gridH: 5,
+  originOffset: 0,
   cellAt: vi.fn(() => undefined),
   furnitureAt: vi.fn(() => undefined),
   cellRect: vi.fn(() => ({ x: 0, y: 0, w: 48, h: 48 })),

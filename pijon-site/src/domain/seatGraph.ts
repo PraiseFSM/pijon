@@ -101,8 +101,8 @@ export class SeatGraph {
    */
   readonly fixtureIdToFid: ReadonlyMap<StudentId, FurnitureId>;
 
-  /** The proximity threshold used to build edges (grid units). */
-  readonly proximityThreshold: number;
+  /** The proximity threshold used to build edges, in fine grid cells. */
+  readonly proximityThresholdCells: number;
 
   // -- Mutable assignment state (pre-population for the lock workflow) --
 
@@ -117,10 +117,9 @@ export class SeatGraph {
   /**
    * Build the SeatGraph for a classroom.
    *
-   * `proximityThreshold` is interpreted as a value in UNITS when the classroom
-   * has `cellsPerUnit` set (i.e. it is converted to fine-cell space before
-   * comparing distances). The default is `PROXIMITY_THRESHOLD` (1.5 units),
-   * which preserves the existing neighbour relationships at any granularity.
+   * `proximityThreshold` (in UNITS) is converted to fine cells internally and
+   * stored as `proximityThresholdCells`.  The default is `PROXIMITY_THRESHOLD`
+   * (1.5 units), which preserves neighbour relationships at any granularity.
    *
    * Legacy call sites that pass a raw numeric threshold continue to work: at
    * the default granularity (cellsPerUnit = 1) units = cells, so thresholdCells
@@ -129,7 +128,7 @@ export class SeatGraph {
   constructor(classroom: Classroom, proximityThreshold: number = PROXIMITY_THRESHOLD) {
     // Convert the threshold from units to fine cells.
     const thresholdInCells = proximityThreshold * classroom.cellsPerUnit;
-    this.proximityThreshold = thresholdInCells;
+    this.proximityThresholdCells = thresholdInCells;
     this.occupants = new Map();
     this.locked = new Set();
 

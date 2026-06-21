@@ -40,9 +40,24 @@ export interface CanvasView {
   readonly gridH: number;
 
   /**
+   * §14.7 — Ghost-margin origin offset in cells.
+   * When the Furniture editor is active, the canvas is expanded by `originOffset`
+   * cells on each side to make room for the ghost ring (PLUS buttons outside the
+   * grid). The grid itself starts at pixel `originOffset * cellSize` in both axes.
+   *
+   * All pixel-coordinate arithmetic in FurnitureEditor's paintOverlay and
+   * onPointerDown must add `originOffset * cellSize` to position grid content
+   * correctly on the expanded canvas.
+   *
+   * Default 0 = standard canvas, no ghost margin (StudentEditor / all others).
+   */
+  readonly originOffset: number;
+
+  /**
    * Convert a client-space point (e.g. MouseEvent.clientX/Y after
    * getBoundingClientRect) to a grid cell (floored, clamped to grid bounds).
    * Returns undefined when the point is outside the grid.
+   * Accounts for originOffset: the grid starts at pixel (originOffset*cellSize).
    */
   cellAt(clientX: number, clientY: number): Vec2 | undefined;
 

@@ -329,11 +329,16 @@ export function drawOccupants(
  * ClassroomCanvas calls this at the start of each frame, then the active
  * editor's paintOverlay() runs on top.
  *
- * @param ctx       canvas 2D context (already DPR-scaled by ClassroomCanvas)
- * @param classroom classroom document from the store
- * @param cellSize  CSS pixels per cell
- * @param locks     locked seat ids (for lock-tint overlay on furniture)
- * @param gridColor optional override for grid line color (§14.5)
+ * @param ctx           canvas 2D context (already DPR-scaled by ClassroomCanvas)
+ * @param classroom     classroom document from the store
+ * @param cellSize      CSS pixels per cell
+ * @param locks         locked seat ids (for lock-tint overlay on furniture)
+ * @param gridColor     optional override for grid line color (§14.5)
+ * @param originOffset  §14.7 ghost-margin: grid starts at this many cells from the canvas edge.
+ *                      Default 0 = no ghost margin (standard StudentEditor rendering).
+ *                      When > 0, the entire base pass is translated right/down by
+ *                      `originOffset * cellSize` pixels so the ghost ring area is left blank
+ *                      for the FurnitureEditor overlay to fill.
  */
 export function renderBasePass(
   ctx: CanvasRenderingContext2D,
@@ -341,12 +346,22 @@ export function renderBasePass(
   cellSize: number,
   locks: ReadonlySet<string>,
   gridColor?: string,
+  originOffset = 0,
 ): void {
+  const originPx = originOffset * cellSize;
+  // Total canvas size (including ghost margin on both sides)
+  const totalCssW = (classroom.gridW + 2 * originOffset) * cellSize;
+  const totalCssH = (classroom.gridH + 2 * originOffset) * cellSize;
+  // Grid content area size
   const cssW = classroom.gridW * cellSize;
   const cssH = classroom.gridH * cellSize;
 
-  // 1. Clear (background color fill)
-  clearCanvas(ctx, cssW, cssH);
+  // 1. Clear the entire canvas (including ghost margin area)
+  clearCanvas(ctx, totalCssW, totalCssH);
+
+  ctx.save();
+  // Translate to shift grid content into the ghost-margin-offset position
+  ctx.translate(originPx, originPx);
 
   // 2. §14.4 Background image (opt-in; under grid lines and furniture)
   drawBackground(ctx, classroom.backgroundImage, cssW, cssH);
@@ -359,4 +374,6 @@ export function renderBasePass(
 
   // 5. Occupant names
   drawOccupants(ctx, classroom, cellSize);
+
+  ctx.restore();
 }

@@ -28,6 +28,7 @@ import type { EditorContext, EditorMode, CanvasView } from '../editors/EditorMod
 import { NoopEditor } from '../editors/NoopEditor.js';
 import type { Vec2 } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
+import { effectiveCellSize } from './cellSizeHelper.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -48,6 +49,17 @@ export interface ClassroomCanvasProps {
   cellSize?: number;
 
   /**
+   * §14.7 — Ghost-margin cell count on each side of the grid.
+   * When non-zero (Furniture editor active), the canvas is expanded by
+   * `ghostMargin` cells on all four sides so PLUS resize buttons can be
+   * drawn outside the grid boundary.  The grid itself is drawn at pixel
+   * offset `(ghostMargin * cellSize, ghostMargin * cellSize)`.
+   *
+   * Defaults to 0 (StudentEditor and all other modes — no extra space).
+   */
+  ghostMargin?: number;
+
+  /**
    * Phase 9 — called once the canvas is mounted and a CanvasView is available.
    * The shell uses this to obtain a CanvasView to build EditorContext for
    * Toolbar / SidePanel components (they need canvas.requestRepaint etc.).
@@ -62,7 +74,7 @@ export interface ClassroomCanvasProps {
 // ClassroomCanvas
 // ---------------------------------------------------------------------------
 
-export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: ClassroomCanvasProps) {
+export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onViewReady }: ClassroomCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // RAF handle stored in a ref (not state) so scheduling never triggers re-renders.
@@ -74,6 +86,13 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
 
   const activeEditor = editor ?? NoopEditor;
 
+  // §14.6 — Derive effective cell size from base unit and granularity.
+  // cellSize prop is the base unit in CSS pixels (one physical "unit").
+  // ecs is the CSS pixels per fine grid cell: baseUnitPx / cellsPerUnit.
+  // At G=1: ecs = cellSize (identical to today's behaviour).
+  // At G=2: ecs = cellSize/2, so 2 fine cells × ecs = cellSize (board size constant).
+  const ecs = effectiveCellSize(cellSize, classroom.cellsPerUnit);
+
   // ---------------------------------------------------------------------------
   // Stable refs — synced in useLayoutEffect so they're never mutated during
   // render.  Accessing .current inside rAF callbacks and event handlers is
@@ -84,13 +103,17 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
   const editorRef = useRef<EditorMode>(activeEditor);
   const classroomRef = useRef(classroom);
   const locksRef = useRef(locks);
-  const cellSizeRef = useRef(cellSize);
+  // cellSizeRef now stores the effectiveCellSize (ecs) so all rAF/event-handler
+  // consumers get the already-derived per-cell pixel size.
+  const cellSizeRef = useRef(ecs);
+  const ghostMarginRef = useRef(ghostMargin);
 
   useLayoutEffect(() => {
     editorRef.current = activeEditor;
     classroomRef.current = classroom;
     locksRef.current = locks;
-    cellSizeRef.current = cellSize;
+    cellSizeRef.current = ecs;
+    ghostMarginRef.current = ghostMargin;
   });
 
   // -------------------------------------------------------------------------
@@ -119,10 +142,12 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
       const cs = cellSizeRef.current;
       const cl = classroomRef.current;
       const lk = locksRef.current;
+      const gm = ghostMarginRef.current;
 
       // Base render pass (grid + furniture + occupant names)
       // §14.5: pass classroom.gridColor (null = use theme default)
-      renderBasePass(ctx, cl, cs, lk, cl.gridColor ?? undefined);
+      // §14.7: pass originOffset so base pass draws grid at the right position
+      renderBasePass(ctx, cl, cs, lk, cl.gridColor ?? undefined, gm);
 
       // Editor overlay — uses the ref so we always call the current editor's method
       const view = buildCanvasView(
@@ -132,6 +157,7 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
         cl.gridH,
         cl.furniture,
         scheduleRepaintRef,
+        gm,
       );
       editorRef.current.paintOverlay(ctx, view);
     });
@@ -150,15 +176,16 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
 
   // Notify the shell once the canvas is mounted so it can build an EditorContext.
   // We call this after the first resize, so the CanvasView geometry is valid.
-  // The callback is also re-invoked whenever classroom dims change (new CanvasView).
+  // The callback is also re-invoked whenever classroom dims, ecs, or ghostMargin change (new CanvasView).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
     const cl = classroomRef.current;
     const cs = cellSizeRef.current;
-    const view = buildCanvasView(canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef);
+    const gm = ghostMarginRef.current;
+    const view = buildCanvasView(canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef, gm);
     onViewReadyRef.current?.(view);
-  }, [classroom.gridW, classroom.gridH, cellSize]);
+  }, [classroom.gridW, classroom.gridH, ecs, ghostMargin]);
 
   // -------------------------------------------------------------------------
   // DPR-aware canvas resize
@@ -170,10 +197,13 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
 
     const cl = classroomRef.current;
     const cs = cellSizeRef.current;
+    const gm = ghostMarginRef.current;
     const dpr = window.devicePixelRatio || 1;
 
-    const cssW = cl.gridW * cs;
-    const cssH = cl.gridH * cs;
+    // §14.7: when ghostMargin > 0 the canvas is wider/taller by 2*ghostMargin
+    // cells on each axis (one cell on each side).
+    const cssW = (cl.gridW + 2 * gm) * cs;
+    const cssH = (cl.gridH + 2 * gm) * cs;
 
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
@@ -188,10 +218,10 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
     scheduleRepaint();
   }, [scheduleRepaint]);
 
-  // Resize whenever grid dims or cellSize change
+  // Resize whenever grid dims, ecs (effective cell size), or ghostMargin change
   useEffect(() => {
     resizeCanvas();
-  }, [resizeCanvas, classroom.gridW, classroom.gridH, cellSize]);
+  }, [resizeCanvas, classroom.gridW, classroom.gridH, ecs, ghostMargin]);
 
   // Repaint whenever classroom contents or locks change (grid dims handled above)
   useEffect(() => {
@@ -244,14 +274,15 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
     if (prev.id !== activeEditor.id) {
       const cl = classroomRef.current;
       const cs = cellSizeRef.current;
+      const gm = ghostMarginRef.current;
 
       const deactivateView = buildCanvasView(
-        canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef,
+        canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef, gm,
       );
       prev.deactivate({ store: usePijonStore.getState(), canvas: deactivateView, persistence: null });
 
       const activateView = buildCanvasView(
-        canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef,
+        canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef, gm,
       );
       activeEditor.activate({ store: usePijonStore.getState(), canvas: activateView, persistence: null });
     }
@@ -269,7 +300,8 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
     if (canvas === null) return null;
     const cl = classroomRef.current;
     const cs = cellSizeRef.current;
-    const view = buildCanvasView(canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef);
+    const gm = ghostMarginRef.current;
+    const view = buildCanvasView(canvas, cs, cl.gridW, cl.gridH, cl.furniture, scheduleRepaintRef, gm);
     return { store: usePijonStore.getState(), canvas: view, persistence: null };
   }, []); // stable; reads from refs
 
@@ -332,8 +364,10 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
   // Render — initial width/height attrs; resizeCanvas overwrites with DPR values
   // -------------------------------------------------------------------------
 
-  const cssW = classroom.gridW * cellSize;
-  const cssH = classroom.gridH * cellSize;
+  // §14.7: account for ghost margin when computing initial canvas dimensions.
+  // Use ecs (effective cell size) so the board pixel size is constant across granularity.
+  const cssW = (classroom.gridW + 2 * ghostMargin) * ecs;
+  const cssH = (classroom.gridH + 2 * ghostMargin) * ecs;
 
   const canvasStyle = useMemo<React.CSSProperties>(
     () => ({ display: 'block', cursor: 'crosshair', outline: 'none' }),
@@ -369,6 +403,11 @@ export function ClassroomCanvas({ editor, cellSize = 48, onViewReady }: Classroo
  * Build a CanvasView for a given canvas + geometry snapshot.
  * The repaintRef indirection breaks the circular dependency between
  * scheduleRepaint (useCallback) and buildCanvasView (plain function).
+ *
+ * §14.7: `originOffset` cells shifts the grid within the canvas (for the
+ * ghost-margin in Furniture mode).  cellAt() subtracts the pixel offset so
+ * coordinates map to logical grid cells (0…gridW-1 / 0…gridH-1) as always.
+ * cellRect() adds the offset back so drawing code produces canvas-pixel coords.
  */
 function buildCanvasView(
   canvas: HTMLCanvasElement,
@@ -377,6 +416,7 @@ function buildCanvasView(
   gridH: number,
   furniture: readonly Furniture[],
   repaintRef: React.MutableRefObject<() => void>,
+  originOffset = 0,
 ): CanvasView {
   // Cache the bounding rect for one event cycle to avoid repeated layout reads.
   let cachedRect: DOMRect | null = null;
@@ -385,14 +425,27 @@ function buildCanvasView(
     return cachedRect;
   };
 
+  // Pixel offset from canvas top-left to grid top-left (accounts for ghost margin)
+  const originPx = originOffset * cellSize;
+
   return {
     cellSize,
     gridW,
     gridH,
+    originOffset,
 
     cellAt(clientX: number, clientY: number): Vec2 | undefined {
       const r = getRect();
-      return clientToCell(clientX, clientY, r.left, r.top, cellSize, gridW, gridH);
+      // Subtract the ghost-margin pixel offset so the coord maps to grid-cell space
+      return clientToCell(
+        clientX,
+        clientY,
+        r.left + originPx,
+        r.top + originPx,
+        cellSize,
+        gridW,
+        gridH,
+      );
     },
 
     furnitureAt(cell: Vec2): Furniture | undefined {
@@ -400,7 +453,9 @@ function buildCanvasView(
     },
 
     cellRect(cell: Vec2): { x: number; y: number; w: number; h: number } {
-      return cellToPixelRect(cell, cellSize);
+      // Add the ghost-margin offset so the returned pixel rect is in canvas space
+      const base = cellToPixelRect(cell, cellSize);
+      return { x: base.x + originPx, y: base.y + originPx, w: base.w, h: base.h };
     },
 
     requestRepaint(): void {

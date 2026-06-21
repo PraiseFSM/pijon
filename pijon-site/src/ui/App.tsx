@@ -62,6 +62,7 @@ const NOOP_VIEW: CanvasView = {
   cellSize: 48,
   gridW: 10,
   gridH: 8,
+  originOffset: 0,
   cellAt() { return undefined; },
   furnitureAt() { return undefined; },
   cellRect() { return { x: 0, y: 0, w: 48, h: 48 }; },
@@ -198,9 +199,12 @@ export default function App() {
               boxShadow: `0 1px 4px ${canvasCardShadow}`,
             }}
           >
+            {/* §14.7 — ghostMargin=1 in Furniture mode adds a 1-cell border
+                 around the canvas so PLUS resize buttons live outside the grid. */}
             <ClassroomCanvas
               editor={activeEditor}
               cellSize={48}
+              ghostMargin={activeEditor.id === 'furniture' ? 1 : 0}
               onViewReady={handleViewReady}
             />
           </div>

@@ -74,12 +74,13 @@ Status: Iterations 2 (§12) and 3 (§13) COMPLETE. Iteration 4 in progress.
 - [x] **§14.4 Classroom background image.** Optional per-classroom background image, persisted. DONE.
 - [x] **§14.5 Adjustable grid color + picker.** Asset-icon button → live color picker; `gridColor`
   persisted per classroom. DONE.
-- [ ] **§14.6 Granularity render density + center-based nearness (CORE).** Higher granularity → denser/
-  smaller squares, furniture keeps physical size (board size constant; px-per-fine-cell = base/G).
-  Nearness ALWAYS from furniture center; identical neighbor sets across granularity. FULL TESTS + review.
-- [ ] **§14.7 Resize buttons → in-grid "ghost ring".** Plus OUTSIDE the grid (where the new row/col would
-  appear) + minus INSIDE on the edge row/col to remove, for all four edges; lighter ghost-square ring;
-  Furniture-mode only. UI precision — ask if ambiguous.
+- [x] **§14.6 Granularity render density + center-based nearness (CORE).** `effectiveCellSize = base/G`
+  keeps board physical size constant while squares densify; furniture keeps physical size. Nearness from
+  furniture CENTER; neighbor sets + greedy allocation identical across G=1/2/3 (tested). Reviewed —
+  caught + fixed a CRITICAL palette-placement-ignored-G bug. DONE.
+- [x] **§14.7 Resize buttons → in-grid "ghost ring".** Ghost margin + origin offset, `resizeButtonRects`
+  math, click→resize routing, old toolbar buttons removed. Coordinate integrity verified under
+  granularity. DONE. (Residual UX: ghost-ring buttons get tiny at G≥8 — consider min hit-size clamp.)
 
 ## Deferred tests (write later)
 

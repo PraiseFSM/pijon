@@ -322,6 +322,32 @@ export const dividerLight = '#eee' as const;  // finer dividers inside panels
 // 13. Grid color picker (§14.5)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 14. Ghost ring / in-grid resize buttons (§14.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ghost-ring cell fill: a very light, translucent square rendered outside the
+ * grid where PLUS buttons live.  Lighter than the grid background so it looks
+ * like a "suggested" extension of the room.
+ */
+export const ghostRingCellFill = 'rgba(200, 220, 255, 0.18)' as const;
+export const ghostRingCellStroke = 'rgba(130, 160, 220, 0.35)' as const;
+
+/** PLUS button (outside the grid — clicking adds a row/col). */
+export const ghostRingPlusButtonFill = 'rgba(25, 118, 210, 0.12)' as const;
+export const ghostRingPlusButtonStroke = 'rgba(25, 118, 210, 0.55)' as const;
+export const ghostRingPlusButtonText = 'rgba(25, 118, 210, 0.85)' as const;
+/** PLUS button hover state. */
+export const ghostRingPlusButtonHoverFill = 'rgba(25, 118, 210, 0.22)' as const;
+
+/** MINUS button (inside the grid — clicking removes a row/col). */
+export const ghostRingMinusButtonFill = 'rgba(180, 60, 60, 0.10)' as const;
+export const ghostRingMinusButtonStroke = 'rgba(180, 60, 60, 0.45)' as const;
+export const ghostRingMinusButtonText = 'rgba(180, 60, 60, 0.80)' as const;
+/** MINUS button hover state. */
+export const ghostRingMinusButtonHoverFill = 'rgba(180, 60, 60, 0.20)' as const;
+
 /** Popover chrome that wraps the <input type="color"> + swatch palette. */
 export const colorPickerPopoverBackground = '#fff' as const;
 export const colorPickerPopoverBorder = '#ccc' as const;
