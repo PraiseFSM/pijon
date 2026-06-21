@@ -128,11 +128,17 @@ export function _injectForTest(url: string, img: HTMLImageElement): void {
 /**
  * Clear all cache state (for testing — never call in production).
  *
+ * Clears _loaded, _pending, and _repaintCallbacks so each test starts with a
+ * fully isolated module-level singleton. Without clearing _repaintCallbacks,
+ * callbacks registered in one test accumulate and fire (silently) during loads
+ * in later tests, which can mask subtle bugs and cause unexpected side-effects.
+ *
  * @internal — exported for test use only.
  */
 export function _clearForTest(): void {
   _loaded.clear();
   _pending.clear();
+  _repaintCallbacks.clear();
 }
 
 // ---------------------------------------------------------------------------

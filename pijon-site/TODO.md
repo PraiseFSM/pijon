@@ -80,13 +80,32 @@ Status: Iterations 2 (§12) and 3 (§13) COMPLETE. Iteration 4 in progress.
   caught + fixed a CRITICAL palette-placement-ignored-G bug. DONE.
 - [x] **§14.7 Resize buttons → in-grid "ghost ring".** Ghost margin + origin offset, `resizeButtonRects`
   math, click→resize routing, old toolbar buttons removed. Coordinate integrity verified under
-  granularity. DONE. (Residual UX: ghost-ring buttons get tiny at G≥8 — consider min hit-size clamp.)
+  granularity. DONE. (Residual UX RESOLVED 2026-06-21: `resizeButtonRects` clamps buttons to
+  `MIN_BUTTON_SIZE_PX = 16` and centers them on the cell when `cellSize < 16` — so buttons stay
+  clickable at high G. Applied at all FurnitureEditor call sites (paint + both hit-test paths, kept
+  in sync via the shared default); covered in `ghostRing.test.ts`.)
 
 ## Deferred tests (write later)
 
 Tests were paused to conserve usage. Code below was shipped WITHOUT tests and needs an
 extensive Vitest suite added later (the project's standard is ~2:1 test:code). Append to this
 list as more untested code lands.
+
+> **Reconciliation (2026-06-21).** Most of the backlog below has since been written — the domain
+> layer (csv, projectFile, store, persistence, render, hitTest, ghostRing, validateSeating, …), the
+> editors (FurnitureEditor, StudentEditor, GridColorPicker, SettingsMenu), and App-level integration
+> are all covered. **980 tests pass; typecheck + lint clean.** The Phase-by-Phase lists below are kept
+> for historical traceability but are largely DONE.
+>
+> **Coverage gaps — ALL CLEARED 2026-06-21** (each: builder pass + checker hole-poke pass):
+> - [x] `src/ui/editors/NoopEditor.ts` — 39 tests (interface-conformance + zero-mutation no-op).
+> - [x] `src/ui/shell/EditorSwitcher.tsx` — 25 tests (tab render/order, active styling, store wiring, a11y roles, orphan id).
+> - [x] `src/ui/shell/TopBar.tsx` — 32 tests (Toolbar render + ctx forwarding, save-status incl. fallback branch, pulse class, idempotent style inject, erase-all confirm flow).
+> - [x] `src/ui/canvas/ClassroomCanvas.tsx` — 63 tests (DPR scaling, rAF coalescing, pointer-capture, event forwarding, editor lifecycle, onViewReady + CanvasView geometry under ghostMargin, unmount cleanup).
+> - [x] `src/ui/canvas/imageCache.ts` — 38 tests (load-once, pending dedup, onload/onerror, repaint callbacks). **Checker fixed a real bug:** `_clearForTest()` now also clears `_repaintCallbacks` (test-isolation leak).
+> - [x] `src/ui/shell/SidePanel.tsx` / `RightPanel.tsx` — 11 tests (delegation + ctx reference forwarding; RightPanel renders null when absent).
+>
+> **Every source module is now referenced by the test suite. Suite: 1188 tests, all green; tsc + lint clean; production build (PWA) succeeds.** The deferred-test backlog below is fully retired.
 
 ### Phase 4 — IO layer
 - `src/domain/io/csv.ts`

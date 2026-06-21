@@ -201,13 +201,47 @@ arrangement (and later, print / export to image or PDF).
 
 ---
 
+## Development Philosophy (how Pijon is built)
+
+Pijon is built by an **agent-led process** steered by short bursts of human feedback. The shape of
+that process is itself a design goal: it must stay legible, testable, and repeatable.
+
+1. **The human gives feedback.** Usually a few sentences — a bug, a feature, a change of direction.
+2. **A conductor agent interprets it.** The conductor uses the **smartest available model at maximum
+   brainpower** to understand the feedback *in context*: the codebase as it actually is, the project
+   goals, and how the request aligns with this outline. This outline is the yardstick — work that
+   drifts from the Design Goals is corrected, not shipped.
+3. **The conductor decomposes the work** into manageable, well-scoped chunks and **spins up
+   sub-agents** on a model appropriate to each chunk (cheaper/faster where the task allows) to
+   implement them.
+4. **The TODO is kept up to date.** The conductor maintains [TODO.md](TODO.md) as the live state of
+   the work — what's done, what's in flight, what's next — and reconciles it with reality rather than
+   letting it drift.
+5. **Every task carries a testing sub-task.** No chunk is "done" until it is tested. A separate
+   **checker agent** is spun up to *poke holes* in the previous agent's work: it writes tests,
+   validates the code against the intent, and fixes any issues it finds. The builder and the checker
+   are deliberately different agents so the checker reviews with fresh eyes. The project standard is
+   roughly **2:1 test:code**.
+6. **Work proceeds in priority order:**
+   1. **Bugs that haven't been fixed yet** — a known-broken thing always outranks new work.
+   2. **Tests that haven't been written yet** — close coverage gaps on shipped code before extending.
+   3. **Features that haven't been added yet** — only once the above are clear.
+7. **The conductor runs to completion.** Once given a direction, the conductor keeps dispatching
+   build→check passes chunk after chunk **without stopping to be re-prompted between them**. It works
+   down the TODO in priority order until the list is clear (or it hits a genuine blocker or a decision
+   only the human can make), keeping the TODO updated as it goes. Finishing a chunk is a cue to start
+   the next one, not to wait.
+
+---
+
 ## How this document is used
 
 1. The **human developer** edits *this* outline — goals, concepts, features.
 2. That is translated into the technical [IMPLEMENTATION_PLAN](docs/IMPLEMENTATION_PLAN.md)
    (stack, class outlines, language decisions, phases).
-3. The **coding agent** reads the implementation plan and dispatches **subagents** to build each
-   piece, checking every change back against the Design Goals above.
+3. The **conductor agent** reads the implementation plan and dispatches **sub-agents** to build each
+   piece (see *Development Philosophy* above), checking every change back against the Design Goals,
+   and pairing each build with a checker agent that tests it.
 
 Prior art that informed these goals lives in the original PyQt prototype:
 `../pijon-app/docs/ARCHITECTURE.md` and `../pijon-app/docs/RESTRUCTURE_PLAN.md`.
