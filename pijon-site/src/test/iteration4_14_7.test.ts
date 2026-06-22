@@ -33,8 +33,11 @@ import type { Store } from '../state/store.js';
 // ---------------------------------------------------------------------------
 
 const CS = 48;  // cellSize
-const GW = 3;   // gridW
-const GH = 3;   // gridH
+// 6×6 so every edge is validly removable (above the 3×3-unit minimum, no
+// furniture) — the MINUS buttons (5.A1) are only rendered/hit-tested at edges
+// where canRemoveEdge is true. Button coordinates below are derived from these.
+const GW = 6;   // gridW
+const GH = 6;   // gridH
 const OO = 1;   // originOffset
 
 // Pixel rect of every resize button for the 3×3, cs=48, offset=1 setup
@@ -332,7 +335,7 @@ import { furnitureId } from '../domain/types.js';
 describe('domain resizeGrid — blocked by occupied edge', () => {
   it('returns {ok:false} when furniture occupies the row being removed from top', () => {
     // Create a 3×3 classroom with a desk at row 0 (top row)
-    const classroom = makeClassroom('c1', 'Test', 3, 3);
+    const classroom = makeClassroom('c1', 'Test', 5, 5);
     const desk = {
       id: furnitureId('d1'),
       kind: 'single_desk' as const,
@@ -352,7 +355,7 @@ describe('domain resizeGrid — blocked by occupied edge', () => {
   });
 
   it('returns {ok:false} when furniture occupies the column being removed from left', () => {
-    const classroom = makeClassroom('c1', 'Test', 3, 3);
+    const classroom = makeClassroom('c1', 'Test', 5, 5);
     const desk = {
       id: furnitureId('d1'),
       kind: 'single_desk' as const,
@@ -372,7 +375,7 @@ describe('domain resizeGrid — blocked by occupied edge', () => {
   });
 
   it('returns {ok:true} when removing an edge with no furniture on it', () => {
-    const classroom = makeClassroom('c1', 'Test', 3, 3);
+    const classroom = makeClassroom('c1', 'Test', 5, 5);
     const desk = {
       id: furnitureId('d1'),
       kind: 'single_desk' as const,

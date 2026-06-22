@@ -18,10 +18,12 @@ import { describe, it, expect } from 'vitest';
 import {
   makeClassroom,
   resizeGrid,
+  canRemoveEdge,
   setGranularity,
   DEFAULT_THRESHOLD_UNITS,
   DEFAULT_CELLS_PER_UNIT,
 } from './classroom.js';
+import type { GridEdge } from './classroom.js';
 import { SeatGraph, PROXIMITY_THRESHOLD } from './seatGraph.js';
 import { furnitureId, studentId } from './types.js';
 import { makeStudent } from './student.js';
@@ -248,6 +250,85 @@ describe('resizeGrid — blocked when furniture is in the way', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toMatch(/too short|minimum/i);
+  });
+});
+
+describe('resizeGrid — minimum placeable area is 3×3 units (5.A2)', () => {
+  it('a 3×3 grid (G=1) cannot remove any edge — already at the minimum', () => {
+    const edges: GridEdge[] = ['top', 'bottom', 'left', 'right'];
+    for (const edge of edges) {
+      const r = resizeGrid(mkClassroom(3, 3), edge, -1);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toMatch(/3×3-unit minimum/);
+    }
+  });
+
+  it('a 4×4 grid (G=1) can shrink to 3, then no further', () => {
+    const r1 = resizeGrid(mkClassroom(4, 4), 'right', -1);
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) return;
+    expect(r1.classroom.gridW).toBe(3);
+    const r2 = resizeGrid(r1.classroom, 'right', -1);
+    expect(r2.ok).toBe(false);
+  });
+
+  it('the 3-unit floor scales with granularity: at G=2 the minimum is 6 cells', () => {
+    const c = { ...mkClassroom(8, 8), cellsPerUnit: 2 };
+    // 8 → 6 is allowed (6 ≥ 3 units × 2 cells/unit)
+    const r1 = resizeGrid(c, 'bottom', -2);
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) return;
+    expect(r1.classroom.gridH).toBe(6);
+    // 6 → 5 would drop below the 6-cell (3-unit) floor
+    const r2 = resizeGrid(r1.classroom, 'bottom', -1);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.reason).toMatch(/minimum is 6/);
+  });
+
+  it('at G=4 the minimum is 12 cells', () => {
+    const c = { ...mkClassroom(12, 12), cellsPerUnit: 4 };
+    const r = resizeGrid(c, 'right', -1);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/minimum is 12/);
+  });
+});
+
+describe('canRemoveEdge (5.A1) — drives whether the − button is shown', () => {
+  const edges: GridEdge[] = ['top', 'bottom', 'left', 'right'];
+
+  it('matches resizeGrid(c, edge, -1).ok for every edge', () => {
+    const c = mkClassroom(10, 8, mkDesk('d', 0, 0)); // desk pins top + left
+    for (const edge of edges) {
+      expect(canRemoveEdge(c, edge)).toBe(resizeGrid(c, edge, -1).ok);
+    }
+  });
+
+  it('false at an edge occupied by furniture (the overlap-fix case)', () => {
+    // Desk at (0,0) occupies the top row and left column.
+    const c = mkClassroom(10, 8, mkDesk('d', 0, 0));
+    expect(canRemoveEdge(c, 'top')).toBe(false);
+    expect(canRemoveEdge(c, 'left')).toBe(false);
+    // Far edges are removable (nothing there, well above the 3-unit floor).
+    expect(canRemoveEdge(c, 'bottom')).toBe(true);
+    expect(canRemoveEdge(c, 'right')).toBe(true);
+  });
+
+  it('false on every edge when already at the 3×3-unit minimum (G=1)', () => {
+    const c = mkClassroom(3, 3);
+    for (const edge of edges) expect(canRemoveEdge(c, edge)).toBe(false);
+  });
+
+  it('false at the minimum across granularities (G=2 → 6×6, G=4 → 12×12)', () => {
+    for (const cellsPerUnit of [2, 4]) {
+      const min = 3 * cellsPerUnit;
+      const c = { ...mkClassroom(min, min), cellsPerUnit };
+      for (const edge of edges) expect(canRemoveEdge(c, edge)).toBe(false);
+    }
+  });
+
+  it('true on a roomy empty grid', () => {
+    const c = mkClassroom(10, 10);
+    for (const edge of edges) expect(canRemoveEdge(c, edge)).toBe(true);
   });
 });
 

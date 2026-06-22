@@ -172,72 +172,73 @@ describe('§13.2 ALLOCATOR_REGISTRY', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §13.2 — SplitButton renders correctly
+// §13.2 — Allocate button + Settings menu renders correctly (§5.B4)
+// SplitButton was replaced with a single Allocate button + SettingsMenu.
 // ---------------------------------------------------------------------------
 
 describe('§13.2 SplitButton renders in StudentToolbar', () => {
   it('renders the primary button with label "Allocate" by default', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    const btn = screen.getByTestId('split-btn-primary');
-    expect(btn.textContent).toBe('Allocate');
+    const btn = screen.getByTestId('allocate-btn');
+    expect(btn.textContent).toContain('Allocate');
   });
 
-  it('renders the caret toggle button', () => {
+  it('renders the settings (gear) button', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    expect(screen.getByTestId('split-btn-caret')).toBeTruthy();
+    expect(screen.getByTestId('settings-gear-button')).toBeTruthy();
   });
 
-  it('dropdown is not visible initially', () => {
+  it('settings menu is not visible initially', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    expect(screen.queryByTestId('split-btn-dropdown')).toBeNull();
+    expect(screen.queryByTestId('settings-menu')).toBeNull();
   });
 
-  it('clicking the caret opens the dropdown', () => {
+  it('clicking the gear button opens the settings menu', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    expect(screen.getByTestId('split-btn-dropdown')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    expect(screen.getByTestId('settings-menu')).toBeTruthy();
   });
 
-  it('dropdown contains variant radios for allocate and smart_shuffle', () => {
+  it('settings menu contains variant radios for allocate and smart_shuffle', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    expect(screen.getByTestId('split-variant-allocate')).toBeTruthy();
-    expect(screen.getByTestId('split-variant-smart_shuffle')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    expect(screen.getByTestId('settings-variant-allocate')).toBeTruthy();
+    expect(screen.getByTestId('settings-variant-smart_shuffle')).toBeTruthy();
   });
 
-  it('dropdown contains algorithm radios for each ALLOCATOR_REGISTRY entry', () => {
+  it('settings menu contains algorithm radios for each ALLOCATOR_REGISTRY entry', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
     for (const entry of ALLOCATOR_REGISTRY) {
-      expect(screen.getByTestId(`split-algorithm-${entry.id}`)).toBeTruthy();
+      expect(screen.getByTestId(`settings-algorithm-${entry.id}`)).toBeTruthy();
     }
   });
 
   it('Greedy algorithm radio is checked by default', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    const greedyRadio = screen.getByTestId<HTMLInputElement>('split-algorithm-greedy');
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    const greedyRadio = screen.getByTestId<HTMLInputElement>('settings-algorithm-greedy');
     expect(greedyRadio.checked).toBe(true);
   });
 
   it('allocate variant radio is checked by default', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    const allocateRadio = screen.getByTestId<HTMLInputElement>('split-variant-allocate');
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    const allocateRadio = screen.getByTestId<HTMLInputElement>('settings-variant-allocate');
     expect(allocateRadio.checked).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// §13.2 — SplitButton dispatches correct store action
+// §13.2 — Allocate button dispatches correct store action (§5.B4)
 // ---------------------------------------------------------------------------
 
 describe('§13.2 SplitButton dispatches actions', () => {
@@ -245,7 +246,7 @@ describe('§13.2 SplitButton dispatches actions', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(allocate).toHaveBeenCalledTimes(1);
   });
 
@@ -253,7 +254,7 @@ describe('§13.2 SplitButton dispatches actions', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(allocate).toHaveBeenCalledTimes(1);
     // The argument must be an Allocator (has .allocate method)
     const arg: unknown = allocate.mock.calls[0]?.[0];
@@ -266,75 +267,70 @@ describe('§13.2 SplitButton dispatches actions', () => {
     const ctx = makeCtx({ smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
 
-    // Open dropdown
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    // Switch variant to smart_shuffle
-    fireEvent.click(screen.getByTestId('split-variant-smart_shuffle'));
-    // Close dropdown (click primary)
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    // Open settings and switch variant
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    // Click allocate button
+    fireEvent.click(screen.getByTestId('allocate-btn'));
 
     expect(smartShuffle).toHaveBeenCalledTimes(1);
   });
 
-  it('switching variant to smart_shuffle changes primary button label', () => {
+  it('switching variant to smart_shuffle — allocate-btn is still "Allocate" (single button)', () => {
+    // The single Allocate button label does NOT change — variant is reflected in Settings only
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open dropdown and switch variant
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    fireEvent.click(screen.getByTestId('split-variant-smart_shuffle'));
-    // Label should now be "Smart Shuffle"
-    expect(screen.getByTestId('split-btn-primary').textContent).toBe('Smart Shuffle');
+    // Open settings and switch variant
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    // The allocate-btn label is always "Allocate"
+    expect(screen.getByTestId('allocate-btn').textContent).toContain('Allocate');
   });
 
   it('switching algorithm to bogo then clicking allocate passes a BogoAllocator', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open dropdown and switch algorithm
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    fireEvent.click(screen.getByTestId('split-algorithm-bogo'));
-    // Click primary
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    // Open settings and switch algorithm
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    fireEvent.click(screen.getByTestId('settings-algorithm-bogo'));
+    // Click allocate button
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     // Should dispatch allocate with an allocator (BogoAllocator has allocate method)
     expect(allocate).toHaveBeenCalledTimes(1);
     const receivedAllocator: unknown = allocate.mock.calls[0]?.[0];
     expect(typeof (receivedAllocator as { allocate?: unknown }).allocate).toBe('function');
   });
 
-  it('last algorithm choice is remembered: bogo radio stays checked after opening dropdown again', () => {
+  it('last algorithm choice is remembered: bogo radio stays checked after opening settings again', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
 
-    // Open dropdown
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    // Select bogo — the radio value changes the React state
-    fireEvent.click(screen.getByTestId('split-algorithm-bogo'));
+    // Open settings
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    // Select bogo
+    fireEvent.click(screen.getByTestId('settings-algorithm-bogo'));
 
-    // Dropdown may or may not still be open; re-open if needed
-    if (screen.queryByTestId('split-btn-dropdown') === null) {
-      fireEvent.click(screen.getByTestId('split-btn-caret'));
-    }
-    const bogoRadio = screen.getByTestId<HTMLInputElement>('split-algorithm-bogo');
+    // Close settings by clicking gear again (toggle)
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    // Re-open
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    const bogoRadio = screen.getByTestId<HTMLInputElement>('settings-algorithm-bogo');
     expect(bogoRadio.checked).toBe(true);
   });
 
-  it('last variant choice is remembered: dispatching the action uses the last chosen algorithm', () => {
-    // Rather than reopening the dropdown (which can be fragile in jsdom),
-    // verify the remembered choice by checking that the primary button label reflects it.
+  it('last variant choice is remembered: dispatching the action uses the last chosen variant', () => {
     const smartShuffle = vi.fn();
     const ctx = makeCtx({ smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
 
-    // Open dropdown and switch variant to smart_shuffle
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    fireEvent.click(screen.getByTestId('split-variant-smart_shuffle'));
+    // Open settings and switch variant to smart_shuffle
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
 
-    // The primary button label should now be "Smart Shuffle" — reflecting remembered state
-    expect(screen.getByTestId('split-btn-primary').textContent).toBe('Smart Shuffle');
-
-    // Clicking primary should dispatch smartShuffle (not allocate)
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    // Clicking allocate button should dispatch smartShuffle (not allocate)
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(smartShuffle).toHaveBeenCalledTimes(1);
   });
 
@@ -344,7 +340,7 @@ describe('§13.2 SplitButton dispatches actions', () => {
     const ctx = makeCtx({ allocate, smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
     // Default is allocate
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(allocate).toHaveBeenCalledTimes(1);
     expect(smartShuffle).not.toHaveBeenCalled();
   });
@@ -392,9 +388,10 @@ describe('§13.6 assigner mode module-level state', () => {
     return { alice, bob, desk1, desk2 };
   }
 
-  it('StudentEditor exposes SidePanel and RightPanel for assigner toggle', () => {
+  it('StudentEditor exposes SidePanel (assigner toggle moved in-panel; RightPanel removed §5.B1)', () => {
     expect(StudentEditor.SidePanel).toBeDefined();
-    expect(StudentEditor.RightPanel).toBeDefined();
+    // RightPanel was removed in §5.B1 — assigner toggle lives inside SidePanel now
+    expect(StudentEditor.RightPanel).toBeUndefined();
   });
 
   it('markerFirstFid is null before any click (cleared by activate)', () => {
@@ -463,26 +460,33 @@ describe('§13.6 AssignerHint renders in StudentToolbar', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §13.6 — RightPanel: assigner mode toggle + hint interaction
+// §13.6 — SidePanel: assigner mode toggle (moved from RightPanel in §5.B1)
 // ---------------------------------------------------------------------------
 
 describe('§13.6 StudentPreferencesPanel: assigner toggle', () => {
   beforeEach(() => { resetStore(); });
 
-  it('renders the assigner toggle button', () => {
-    const ctx = makeCtx();
+  // Helper: build ctx with a selected student so the pref-detail/assigner section appears
+  function makeCtxWithSelectedStudent() {
+    const alice = makeStudent(mkStudentId('alice-toggle'), 'Alice');
+    usePijonStore.setState({ roster: [alice] });
+    return { store: makeStoreMock({ roster: [alice], selectedStudentId: alice.id }), canvas: makeCanvasMock(), persistence: null } as EditorContext;
+  }
+
+  it('renders the assigner toggle button when a student is selected', () => {
+    const ctx = makeCtxWithSelectedStudent();
     act(() => {
-      render(React.createElement(StudentEditor.RightPanel!, { ctx }));
+      render(React.createElement(StudentEditor.SidePanel, { ctx }));
     });
-    // Should find the "Enable Assigner" button
+    // Should find the "Enable Assigner" button inside the pref-detail section
     const btn = screen.queryByText('Enable Assigner') ?? screen.queryByText(/assigner/i);
     expect(btn).toBeTruthy();
   });
 
   it('toggling assigner ON changes button text to include "Assigner ON"', () => {
-    const ctx = makeCtx();
+    const ctx = makeCtxWithSelectedStudent();
     act(() => {
-      render(React.createElement(StudentEditor.RightPanel!, { ctx }));
+      render(React.createElement(StudentEditor.SidePanel, { ctx }));
     });
     const toggleBtn = screen.getByText('Enable Assigner');
     act(() => { fireEvent.click(toggleBtn); });
@@ -490,9 +494,9 @@ describe('§13.6 StudentPreferencesPanel: assigner toggle', () => {
   });
 
   it('toggling assigner mode OFF clears the hint (test via module callback)', () => {
-    const ctx = makeCtx();
+    const ctx = makeCtxWithSelectedStudent();
     act(() => {
-      render(React.createElement(StudentEditor.RightPanel!, { ctx }));
+      render(React.createElement(StudentEditor.SidePanel, { ctx }));
     });
     // Toggle ON
     act(() => { fireEvent.click(screen.getByText('Enable Assigner')); });
@@ -899,7 +903,7 @@ describe('§13.1 Cross-browser drag kind stash (Firefox/Safari fallback)', () =>
 });
 
 // ---------------------------------------------------------------------------
-// §13.2 — Allocator class instance verification (split-button passes correct class)
+// §13.2 — Allocator class instance verification (Allocate button passes correct class)
 // ---------------------------------------------------------------------------
 
 describe('§13.2 SplitButton passes correct allocator class instances', () => {
@@ -907,9 +911,9 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(allocate).toHaveBeenCalledTimes(1);
-     
+
     const arg = allocate.mock.calls[0]?.[0];
     expect(arg).toBeInstanceOf(GreedyAllocator);
   });
@@ -918,11 +922,13 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    fireEvent.click(screen.getByTestId('split-algorithm-bogo'));
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    // Open settings and select bogo
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    fireEvent.click(screen.getByTestId('settings-algorithm-bogo'));
+    // Click allocate
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(allocate).toHaveBeenCalledTimes(1);
-     
+
     const arg = allocate.mock.calls[0]?.[0];
     expect(arg).toBeInstanceOf(BogoAllocator);
   });
@@ -931,27 +937,29 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     const smartShuffle = vi.fn();
     const ctx = makeCtx({ smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    fireEvent.click(screen.getByTestId('split-variant-smart_shuffle'));
-    fireEvent.click(screen.getByTestId('split-btn-primary'));
+    // Open settings and select smart_shuffle variant
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    // Click allocate button
+    fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(smartShuffle).toHaveBeenCalledTimes(1);
-     
+
     const arg = smartShuffle.mock.calls[0]?.[0];
     expect(arg).toBeInstanceOf(GreedyAllocator);
   });
 
-  it('dropdown-open-then-click-outside does NOT dispatch any action', () => {
+  it('settings-open-then-click-outside does NOT dispatch any action', () => {
     const allocate = vi.fn();
     const smartShuffle = vi.fn();
     const ctx = makeCtx({ allocate, smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open dropdown
-    fireEvent.click(screen.getByTestId('split-btn-caret'));
-    expect(screen.getByTestId('split-btn-dropdown')).toBeTruthy();
-    // Click outside (on document body)
-    fireEvent.mouseDown(document.body, { bubbles: true });
-    // Dropdown should now be closed
-    expect(screen.queryByTestId('split-btn-dropdown')).toBeNull();
+    // Open settings
+    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    expect(screen.getByTestId('settings-menu')).toBeTruthy();
+    // Click outside (on document body via pointerdown — SettingsMenu uses capture-phase listener)
+    act(() => { fireEvent.pointerDown(document.body); });
+    // Settings menu should now be closed
+    expect(screen.queryByTestId('settings-menu')).toBeNull();
     // Neither action should have been dispatched
     expect(allocate).not.toHaveBeenCalled();
     expect(smartShuffle).not.toHaveBeenCalled();
@@ -1007,6 +1015,8 @@ describe('§13.6 Pulse loop start/stop lifecycle', () => {
         furniture: [desk1],
       },
       roster: [alice],
+      // Set selectedStudentId before creating ctx so ctx.store has it
+      selectedStudentId: alice.id,
     });
 
     const canvasMock = makeCanvasMock();
@@ -1020,10 +1030,10 @@ describe('§13.6 Pulse loop start/stop lifecycle', () => {
 
     StudentEditor.activate(ctx);
 
-    // Manually enter assigner mode by updating module-level state via the effect that
-    // the RightPanel drives. We do this by rendering the RightPanel and toggling:
+    // Render SidePanel with the student selected — assigner toggle appears in the
+    // pref-detail section that shows when selectedStudentId is set (§5.B1)
     act(() => {
-      render(React.createElement(StudentEditor.RightPanel!, { ctx }));
+      render(React.createElement(StudentEditor.SidePanel, { ctx }));
     });
     act(() => {
       fireEvent.click(screen.getByText('Enable Assigner'));
@@ -1056,6 +1066,8 @@ describe('§13.6 Pulse loop start/stop lifecycle', () => {
     usePijonStore.setState({
       classroom: { ...makeClassroom('c1', 'Room', 5, 5), furniture: [desk] },
       roster: [bob],
+      // Set selectedStudentId before creating ctx so ctx.store has it
+      selectedStudentId: bob.id,
     });
 
     const canvasMock = makeCanvasMock();
@@ -1069,8 +1081,9 @@ describe('§13.6 Pulse loop start/stop lifecycle', () => {
 
     StudentEditor.activate(ctx);
 
+    // Render SidePanel with bob selected — assigner toggle visible (§5.B1)
     act(() => {
-      render(React.createElement(StudentEditor.RightPanel!, { ctx }));
+      render(React.createElement(StudentEditor.SidePanel, { ctx }));
     });
     act(() => {
       fireEvent.click(screen.getByText('Enable Assigner'));
@@ -1123,6 +1136,8 @@ describe('§13.6 AssignerHint lifecycle (correct name, clears on events)', () =>
     usePijonStore.setState({
       classroom: { ...makeClassroom('c1', 'Room', 5, 5), furniture: [desk] },
       roster: [alice],
+      // Must set before ctx is created so ctx.store.selectedStudentId is non-null
+      selectedStudentId: alice.id,
     });
 
     const canvasMock = makeCanvasMock();
@@ -1141,9 +1156,9 @@ describe('§13.6 AssignerHint lifecycle (correct name, clears on events)', () =>
 
     StudentEditor.activate(ctx);
 
-    // Enable assigner mode by rendering RightPanel
+    // Render SidePanel with alice selected — assigner toggle visible (§5.B1)
     act(() => {
-      render(React.createElement(StudentEditor.RightPanel!, { ctx }));
+      render(React.createElement(StudentEditor.SidePanel, { ctx }));
     });
     act(() => {
       // Find and click the Enable Assigner button
@@ -1177,6 +1192,8 @@ describe('§13.6 AssignerHint lifecycle (correct name, clears on events)', () =>
     usePijonStore.setState({
       classroom: { ...makeClassroom('c1', 'Room', 5, 5), furniture: [desk] },
       roster: [carol],
+      // Must set before ctx is created so ctx.store.selectedStudentId is non-null
+      selectedStudentId: carol.id,
     });
 
     const canvasMock = makeCanvasMock();
@@ -1190,7 +1207,8 @@ describe('§13.6 AssignerHint lifecycle (correct name, clears on events)', () =>
 
     act(() => { render(React.createElement(StudentEditor.Toolbar, { ctx })); });
     StudentEditor.activate(ctx);
-    act(() => { render(React.createElement(StudentEditor.RightPanel!, { ctx })); });
+    // Render SidePanel with carol selected — assigner toggle visible (§5.B1)
+    act(() => { render(React.createElement(StudentEditor.SidePanel, { ctx })); });
 
     act(() => {
       const btns = screen.getAllByText('Enable Assigner');

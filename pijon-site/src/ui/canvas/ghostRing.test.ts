@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resizeButtonRects, hitButton, ghostRingCells, MIN_BUTTON_SIZE_PX } from './ghostRing.js';
+import { resizeButtonRects, hitButton, ghostRingCells } from './ghostRing.js';
 
 // ---------------------------------------------------------------------------
 // A. resizeButtonRects
@@ -54,32 +54,31 @@ describe('resizeButtonRects', () => {
     }
   });
 
-  // ---- Button size: cellSize when ≥ minButtonSize, else clamped to min ------
+  // ---- Button size: exactly ONE UNIT = cellSize × cellsPerUnit (5.A4) ------
 
-  it('every button is exactly cellSize × cellSize when cellSize ≥ MIN_BUTTON_SIZE_PX', () => {
-    const cs = 40; // 40 >= 16
-    const btns = resizeButtonRects(3, 3, cs, 1);
+  it('every button is exactly cellSize × cellSize at G=1', () => {
+    const cs = 40;
+    const btns = resizeButtonRects(3, 3, cs, 1, 1);
     for (const btn of btns) {
       expect(btn.w).toBe(cs);
       expect(btn.h).toBe(cs);
     }
   });
 
-  it('buttons are clamped to MIN_BUTTON_SIZE_PX when cellSize < MIN_BUTTON_SIZE_PX', () => {
-    // cellSize=1 is well below the minimum of 16 px
-    const btns = resizeButtonRects(5, 5, 1, 1);
-    for (const btn of btns) {
-      expect(btn.w).toBe(MIN_BUTTON_SIZE_PX);
-      expect(btn.h).toBe(MIN_BUTTON_SIZE_PX);
+  it('button size = cellSize × cellsPerUnit (one unit) at G=2 and G=4', () => {
+    for (const g of [2, 4]) {
+      const cs = 48 / g;                 // effective fine-cell for a constant 48px unit
+      const btns = resizeButtonRects(6, 6, cs, g, g); // ghost margin = one unit = g cells
+      for (const btn of btns) {
+        expect(btn.w).toBe(48);          // one unit, constant physical size
+        expect(btn.h).toBe(48);
+      }
     }
   });
 
-  it('buttons are not clamped when cellSize exactly equals MIN_BUTTON_SIZE_PX', () => {
-    const btns = resizeButtonRects(5, 5, MIN_BUTTON_SIZE_PX, 1);
-    for (const btn of btns) {
-      expect(btn.w).toBe(MIN_BUTTON_SIZE_PX);
-      expect(btn.h).toBe(MIN_BUTTON_SIZE_PX);
-    }
+  it('button physical size is invariant across granularity (constant board)', () => {
+    const sizes = [1, 2, 4].map((g) => resizeButtonRects(6, 6, 48 / g, g, g)[0]!.w);
+    expect(sizes).toEqual([48, 48, 48]);
   });
 
   // ---- PLUS buttons lie OUTSIDE the grid -----------------------------------
@@ -253,39 +252,28 @@ describe('resizeButtonRects', () => {
 
   // ---- Varying cellSize ----------------------------------------------------
 
-  it('scales correctly with cellSize=1 (unit grid) — buttons clamped to MIN_BUTTON_SIZE_PX and centered', () => {
-    // gridW=4, gridH=4, cellSize=1, originOffset=1
-    // hCenterCol = floor(4/2) = 2, vCenterRow = floor(4/2) = 2
-    // gridLeft = 1, gridTop = 1, gridRight = 5, gridBottom = 5
-    //
-    // Cell center for topPlus (naturalX=3, naturalY=0):
-    //   cx = 3 + 0.5 = 3.5, cy = 0 + 0.5 = 0.5
-    //   x = 3.5 - MIN/2 = 3.5 - 8 = -4.5, y = 0.5 - 8 = -7.5
-    // Cell center for topMinus (naturalX=3, naturalY=1):
-    //   cx = 3.5, cy = 1 + 0.5 = 1.5
-    //   x = 3.5 - 8 = -4.5, y = 1.5 - 8 = -6.5
-    const min = MIN_BUTTON_SIZE_PX;
-    const btns = resizeButtonRects(4, 4, 1, 1);
-    const topPlus  = btns.find((b) => b.edge === 'top'  && b.sign === 1);
-    const topMinus = btns.find((b) => b.edge === 'top'  && b.sign === -1);
-    // Centers must be on the natural cell center points
-    expect(topPlus?.x).toBeCloseTo(3.5 - min / 2);
-    expect(topPlus?.y).toBeCloseTo(0.5 - min / 2);
-    expect(topMinus?.x).toBeCloseTo(3.5 - min / 2);
-    expect(topMinus?.y).toBeCloseTo(1.5 - min / 2);
+  it('one-unit button is flush to the grid boundary at G=2', () => {
+    // base unit 48px, G=2 → effective cell 24px, ghost margin = 2 cells = 48px
+    const cs = 24; const g = 2; const op = 2;
+    const btns = resizeButtonRects(6, 6, cs, op, g);
+    const gridTop = op * cs; // 48
+    const topPlus = btns.find((b) => b.edge === 'top' && b.sign === 1)!;
+    expect(topPlus.h).toBe(48);                  // one unit
+    expect(topPlus.y + topPlus.h).toBe(gridTop); // inner edge flush to grid top (outside)
+    const topMinus = btns.find((b) => b.edge === 'top' && b.sign === -1)!;
+    expect(topMinus.y).toBe(gridTop);            // outer edge flush to grid top (inside)
   });
 
   // ---- Centering for even vs. odd grid widths ------------------------------
 
-  it('hCenterCol = floor(gridW/2) for even gridW (no exact center)', () => {
-    // gridW=4 → hCenterCol = 2 (left of center pair)
-    // Use cellSize=20 (≥ MIN_BUTTON_SIZE_PX=16) so clamping does not activate
+  it('top/bottom buttons are centered on the true edge midpoint (even gridW)', () => {
+    // gridW=4 → true midpoint is gridLeft + 2*cs; a one-cell button is centered there
     const cs = 20;
     const op = 1;
     const gridLeft = op * cs;
-    const btns = resizeButtonRects(4, 1, cs, op);
+    const btns = resizeButtonRects(4, 1, cs, op, 1);
     const topPlus = btns.find((b) => b.edge === 'top' && b.sign === 1);
-    expect(topPlus?.x).toBe(gridLeft + 2 * cs);
+    expect(topPlus?.x).toBe(gridLeft + (4 * cs) / 2 - cs / 2); // 50
   });
 
   it('hCenterCol = floor(gridW/2) for odd gridW (exact center)', () => {
@@ -299,61 +287,46 @@ describe('resizeButtonRects', () => {
     expect(topPlus?.x).toBe(gridLeft + 1 * cs);
   });
 
-  it('vCenterRow = floor(gridH/2) for gridH=6 (3)', () => {
-    // Use cellSize=20 (≥ MIN_BUTTON_SIZE_PX=16) so clamping does not activate
+  it('left/right buttons are centered on the true edge midpoint (gridH=6)', () => {
     const cs = 20;
     const op = 1;
     const gridTop = op * cs;
-    const btns = resizeButtonRects(1, 6, cs, op);
+    const btns = resizeButtonRects(1, 6, cs, op, 1);
     const leftPlus = btns.find((b) => b.edge === 'left' && b.sign === 1);
-    expect(leftPlus?.y).toBe(gridTop + 3 * cs);
+    expect(leftPlus?.y).toBe(gridTop + (6 * cs) / 2 - cs / 2); // 70
   });
 
-  it('vCenterRow = floor(gridH/2) for gridH=1 (0)', () => {
-    // Use cellSize=20 (≥ MIN_BUTTON_SIZE_PX=16) so clamping does not activate
+  it('a single-row grid centers the vertical buttons on the row', () => {
     const cs = 20;
     const op = 1;
     const gridTop = op * cs;
-    const btns = resizeButtonRects(1, 1, cs, op);
+    const btns = resizeButtonRects(1, 1, cs, op, 1);
     const leftPlus = btns.find((b) => b.edge === 'left' && b.sign === 1);
-    // vCenterRow = floor(1/2) = 0
-    expect(leftPlus?.y).toBe(gridTop + 0 * cs);
+    // midpoint of a 1-row grid is gridTop + cs/2; one-cell button centered → y = gridTop
+    expect(leftPlus?.y).toBe(gridTop);
   });
 
-  // ---- Minimum button size (fix §polish — ghost-ring buttons at high G) ----
+  // ---- One-unit sizing at high granularity (5.A4 — replaces the old clamp) ----
 
-  it('at high granularity (cellSize=4) all buttons are ≥ MIN_BUTTON_SIZE_PX', () => {
-    // Simulate G=12 on a 10-unit grid: fine cells = 120, cellSize shrinks.
-    // Use cellSize=4 < MIN_BUTTON_SIZE_PX=16
-    const btns = resizeButtonRects(20, 20, 4, 1);
+  it('buttons are one unit at high granularity (no min clamp)', () => {
+    // G=4: effective cell 12px → button = 12 × 4 = 48px (one unit)
+    const btns = resizeButtonRects(20, 20, 12, 4, 4);
     for (const btn of btns) {
-      expect(btn.w).toBeGreaterThanOrEqual(MIN_BUTTON_SIZE_PX);
-      expect(btn.h).toBeGreaterThanOrEqual(MIN_BUTTON_SIZE_PX);
+      expect(btn.w).toBe(48);
+      expect(btn.h).toBe(48);
     }
   });
 
-  it('at high granularity buttons are centered on their natural cell center', () => {
-    // cellSize=4, gridW=10, gridH=10, originOffset=1
-    // hCenterCol = 5, vCenterRow = 5
-    // gridLeft = 4, gridTop = 4
-    // top PLUS naturalX = 4 + 5*4 = 24, naturalY = 4 - 4 = 0
-    //   cellCenter cx = 24 + 2 = 26, cy = 0 + 2 = 2
-    //   expected x = 26 - 8 = 18, y = 2 - 8 = -6
-    const cs = 4;
-    const min = MIN_BUTTON_SIZE_PX; // 16, half=8
-    const op = 1;
-    const gridLeft = op * cs;
-    const hCenter = Math.floor(10 / 2); // 5
-    const naturalX = gridLeft + hCenter * cs; // 4 + 20 = 24
-    const naturalY_plus = op * cs - cs; // 4 - 4 = 0
-    const btns = resizeButtonRects(10, 10, cs, op);
-    const topPlus = btns.find((b) => b.edge === 'top' && b.sign === 1);
-    const expectedCx = naturalX + cs / 2; // 26
-    const expectedCy = naturalY_plus + cs / 2; // 2
-    expect(topPlus?.x).toBeCloseTo(expectedCx - min / 2);
-    expect(topPlus?.y).toBeCloseTo(expectedCy - min / 2);
-    expect(topPlus?.w).toBe(min);
-    expect(topPlus?.h).toBe(min);
+  it('PLUS fully outside and MINUS fully inside at high granularity', () => {
+    const cs = 12; const g = 4; const op = 4;
+    const btns = resizeButtonRects(20, 20, cs, op, g);
+    const gridTop = op * cs;
+    const gridBottom = gridTop + 20 * cs;
+    const topPlus = btns.find((b) => b.edge === 'top' && b.sign === 1)!;
+    expect(topPlus.y + topPlus.h).toBeLessThanOrEqual(gridTop); // outside
+    const topMinus = btns.find((b) => b.edge === 'top' && b.sign === -1)!;
+    expect(topMinus.y).toBeGreaterThanOrEqual(gridTop);          // inside
+    expect(topMinus.y + topMinus.h).toBeLessThanOrEqual(gridBottom);
   });
 
   it('at G=1 (cellSize=48) button positions are unchanged — no clamping', () => {
@@ -371,15 +344,6 @@ describe('resizeButtonRects', () => {
     expect(topPlus?.y).toBe(op * cs - cs);
     expect(topPlus?.w).toBe(cs);
     expect(topPlus?.h).toBe(cs);
-  });
-
-  it('custom minButtonSize overrides the default', () => {
-    // Pass minButtonSize=32: cellSize=20 < 32 → buttons should be 32×32
-    const btns = resizeButtonRects(5, 5, 20, 1, 32);
-    for (const btn of btns) {
-      expect(btn.w).toBe(32);
-      expect(btn.h).toBe(32);
-    }
   });
 
   it('PLUS stays outside grid even when clamped (center is outside)', () => {

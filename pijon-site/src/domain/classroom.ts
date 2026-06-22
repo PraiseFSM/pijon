@@ -259,12 +259,16 @@ export function resizeGrid(
       break;
   }
 
-  // ---- Guard: minimum 1×1 -----
-  if (newGridW < 1) {
-    return { ok: false, reason: `Cannot remove: grid would be too narrow (${newGridW.toString()} columns). Minimum is 1.` };
+  // ---- Guard: minimum placeable area is 3×3 UNITS (granularity-aware) -----
+  // The floor is measured in real units, so it scales with granularity:
+  // 3×3 cells at G=1, 6×6 at G=2, 12×12 at G=4. This keeps the smallest usable
+  // classroom constant in physical size regardless of cell density.
+  const minCells = 3 * c.cellsPerUnit;
+  if (newGridW < minCells) {
+    return { ok: false, reason: `Cannot remove: grid would be smaller than the 3×3-unit minimum (${newGridW.toString()} columns; minimum is ${minCells.toString()} at this granularity).` };
   }
-  if (newGridH < 1) {
-    return { ok: false, reason: `Cannot remove: grid would be too short (${newGridH.toString()} rows). Minimum is 1.` };
+  if (newGridH < minCells) {
+    return { ok: false, reason: `Cannot remove: grid would be smaller than the 3×3-unit minimum (${newGridH.toString()} rows; minimum is ${minCells.toString()} at this granularity).` };
   }
 
   // ---- Compute shifted furniture positions -----
@@ -309,6 +313,23 @@ export function resizeGrid(
     ok: true,
     classroom: { ...c, gridW: newGridW, gridH: newGridH, furniture: newFurniture },
   };
+}
+
+/**
+ * Whether one row/column can be validly removed at the given edge.
+ *
+ * Returns false when removing would (a) breach the 3×3-unit minimum placeable
+ * area, or (b) require removing a row/column that any furniture occupies (which
+ * `resizeGrid` already rejects). Equivalent to "would `resizeGrid(c, edge, -1)`
+ * succeed?" — kept as a named helper so the Furniture editor can decide whether
+ * to render the − (remove) button for each edge.
+ *
+ * Hiding the − button at edges where removal is illegal also prevents a desk
+ * from ever sitting on top of a − button: when furniture occupies the edge
+ * row/col, that edge's button simply isn't drawn.
+ */
+export function canRemoveEdge(c: Classroom, edge: GridEdge): boolean {
+  return resizeGrid(c, edge, -1).ok;
 }
 
 // ---------------------------------------------------------------------------

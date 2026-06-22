@@ -310,7 +310,7 @@ describe('EDITOR_REGISTRY (§12.4)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. EditorMode shape — StudentEditor exposes SidePanel AND RightPanel
+// 7. EditorMode shape — StudentEditor exposes SidePanel (§5.B1: no RightPanel)
 // ---------------------------------------------------------------------------
 
 describe('StudentEditor EditorMode shape', () => {
@@ -323,8 +323,8 @@ describe('StudentEditor EditorMode shape', () => {
     expect(typeof StudentEditor.SidePanel).toBe('function');
   });
 
-  it('exposes a RightPanel component', () => {
-    expect(typeof StudentEditor.RightPanel).toBe('function');
+  it('does NOT expose a RightPanel (prefs moved into SidePanel in §5.B1)', () => {
+    expect(StudentEditor.RightPanel).toBeUndefined();
   });
 
   it('exposes a Toolbar component', () => {
@@ -358,7 +358,7 @@ describe('StudentEditor — assigner mode vs drag routing', () => {
   };
 
   beforeEach(() => {
-    const store = makeStoreMock();
+    const store = makeStoreMock({ roster: [alice, bob] });
     (store as { classroom: typeof store.classroom }).classroom = {
       id: 'test-classroom',
       name: 'Test',
@@ -410,14 +410,12 @@ describe('StudentEditor — assigner mode vs drag routing', () => {
   });
 
   it('in assigner mode (ON), two sequential clicks call setMutualPreference', () => {
-    // Simulate the RightPanel toggling assigner mode on via the module-level var
-    // We cannot reach it via React; instead we drive the canvas events directly.
-    // The module-level `assignerModeActive` is set by the RightPanel's useEffect.
-    // For a unit test we render the RightPanel and click the toggle, then fire events.
+    // §5.B1: assigner toggle now lives in the SidePanel (not RightPanel).
+    // Render the SidePanel with Alice selected so the assigner toggle appears.
+    const ctxWithSelection = { ...ctx };
+    (ctxWithSelection.store as { selectedStudentId: typeof alice.id }).selectedStudentId = alice.id;
 
-    // Render the right panel so the toggle is wired
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
+    render(<StudentEditor.SidePanel ctx={ctxWithSelection} />);
 
     // Click the "Enable Assigner" button
     const toggleBtn = screen.getByRole('button', { name: /enable assigner/i });
@@ -453,9 +451,10 @@ describe('StudentEditor — assigner mode vs drag routing', () => {
   });
 
   it('in assigner mode, ESC cancels the in-progress selection', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
+    const ctxWithSelection = { ...ctx };
+    (ctxWithSelection.store as { selectedStudentId: typeof alice.id }).selectedStudentId = alice.id;
 
+    render(<StudentEditor.SidePanel ctx={ctxWithSelection} />);
     act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
 
     // First click
@@ -486,9 +485,10 @@ describe('StudentEditor — assigner mode vs drag routing', () => {
   });
 
   it('self-target in assigner mode is a no-op', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
+    const ctxWithSelection = { ...ctx };
+    (ctxWithSelection.store as { selectedStudentId: typeof alice.id }).selectedStudentId = alice.id;
 
+    render(<StudentEditor.SidePanel ctx={ctxWithSelection} />);
     act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
 
     // Click Alice twice (same desk)
@@ -648,10 +648,10 @@ describe('StudentEditor SidePanel — Import CSV at bottom', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 12. Right panel — preferences panel renders for selected student
+// 12. SidePanel — inline preferences shown for selected student (§5.B1)
 // ---------------------------------------------------------------------------
 
-describe('StudentEditor RightPanel — preferences panel', () => {
+describe('StudentEditor SidePanel — inline preferences for selected student', () => {
   const alice: ReturnType<typeof makeStudent> = {
     id: makeSid('alice-id'),
     name: 'Alice',
@@ -679,84 +679,56 @@ describe('StudentEditor RightPanel — preferences panel', () => {
   });
 
   it('renders without crashing', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
-    expect(screen.getByText(/preferences/i)).toBeInTheDocument();
+    render(<StudentEditor.SidePanel ctx={ctx} />);
+    // Roster header always present
+    expect(screen.getByText(/roster/i)).toBeInTheDocument();
   });
 
-  it('shows the selected student\'s name', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
-    expect(screen.getByText('Alice')).toBeInTheDocument();
+  it('shows the selected student preference detail section', () => {
+    render(<StudentEditor.SidePanel ctx={ctx} />);
+    // data-testid="student-pref-detail" is rendered when a student is selected
+    expect(document.querySelector('[data-testid="student-pref-detail"]')).toBeTruthy();
   });
 
-  it('shows the Assigner toggle button at the top', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
+  it('shows the Assigner toggle button when a student is selected', () => {
+    render(<StudentEditor.SidePanel ctx={ctx} />);
     expect(screen.getByRole('button', { name: /enable assigner/i })).toBeInTheDocument();
   });
 
-  it('shows the Show Links toggle button', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
-    expect(screen.getByRole('button', { name: /show links/i })).toBeInTheDocument();
-  });
-
-  it('shows the student\'s preference entries', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
-    // '↓ Avoid' direction label should appear (Alice has an avoid-pref toward Bob)
+  it('shows the student preference entries inline', () => {
+    render(<StudentEditor.SidePanel ctx={ctx} />);
+    // Alice has an avoid-pref; the '↓ Avoid' direction label should appear
     expect(screen.getByText('↓ Avoid')).toBeInTheDocument();
   });
 
   it('renders a ✕ remove button for each preference', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
+    render(<StudentEditor.SidePanel ctx={ctx} />);
     // The ✕ button has title="Remove this preference"
     const removeButtons = screen.getAllByTitle('Remove this preference');
     expect(removeButtons.length).toBeGreaterThanOrEqual(1);
   });
 
   it('calls clearMutualPreference when ✕ is clicked for a student-kind pref', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
+    render(<StudentEditor.SidePanel ctx={ctx} />);
     const removeBtn = screen.getAllByTitle('Remove this preference')[0]!;
     act(() => { fireEvent.click(removeBtn); });
     expect(ctx.store.clearMutualPreference).toHaveBeenCalledWith(alice.id, bob.id);
   });
 
-  it('shows a "target student" dropdown excluding self', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
-    const select = screen.getByRole('combobox');
-    // Alice should NOT be an option (self-exclusion)
-    expect(select.innerHTML).not.toContain('Alice');
-    // Bob SHOULD be an option
-    expect(select.innerHTML).toContain('Bob');
+  it('does NOT show an add-preference form (§5.B2 — prefs via assigner/drag only)', () => {
+    render(<StudentEditor.SidePanel ctx={ctx} />);
+    // No combobox / dropdown for target student
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    // No "Add" button for preferences (CSV import Add and student Add are not "Add pref")
+    const addBtns = screen.queryAllByRole('button', { name: /^add$/i });
+    expect(addBtns).toHaveLength(0);
   });
 
-  it('calls setMutualPreference when Add pref is submitted', () => {
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctx} />);
-
-    const select = screen.getByRole('combobox');
-    act(() => { fireEvent.change(select, { target: { value: bob.id } }); });
-
-    const addBtn = screen.getByRole('button', { name: /^add$/i });
-    act(() => { fireEvent.click(addBtn); });
-
-    expect(ctx.store.setMutualPreference).toHaveBeenCalledWith(
-      alice.id,
-      bob.id,
-      expect.any(Number),
-    );
-  });
-
-  it('shows a placeholder when no student is selected', () => {
+  it('shows no preference detail when no student is selected', () => {
     const ctxNoSelection = makeCtx({ roster: [alice, bob], selectedStudentId: null });
-    const RightPanel = StudentEditor.RightPanel!;
-    render(<RightPanel ctx={ctxNoSelection} />);
-    expect(screen.getByText(/click a student/i)).toBeInTheDocument();
+    render(<StudentEditor.SidePanel ctx={ctxNoSelection} />);
+    // No pref detail section
+    expect(document.querySelector('[data-testid="student-pref-detail"]')).toBeNull();
   });
 });
 
@@ -974,18 +946,22 @@ describe('store.removeStudent — lock clearing', () => {
 // ---------------------------------------------------------------------------
 
 describe('StudentEditor module-state bleed — activate/deactivate cycle', () => {
-  it('deactivate resets showLinks so re-mounting RightPanel starts with links OFF', () => {
+  it('deactivate resets showLinks so re-mounting Toolbar starts with links OFF', () => {
     const ctx = makeCtx();
     StudentEditor.activate(ctx);
 
-    // Mount the RightPanel and turn showLinks ON
-    const RightPanel = StudentEditor.RightPanel!;
-    const { unmount } = render(<RightPanel ctx={ctx} />);
+    // Mount the Toolbar and open Settings, toggle Show Links ON
+    const { unmount } = render(<StudentEditor.Toolbar ctx={ctx} />);
 
-    const linksBtn = screen.getByRole('button', { name: /show links/i });
-    act(() => { fireEvent.click(linksBtn); });
-    // Button should now say "Links ON"
-    expect(screen.getByRole('button', { name: /links on/i })).toBeInTheDocument();
+    // Open Settings menu
+    const gearBtn = screen.getByTestId('settings-gear-button');
+    act(() => { fireEvent.click(gearBtn); });
+
+    // Toggle Show Links ON via the settings toggle
+    const showLinksToggle = screen.getByTestId('settings-show-links-toggle');
+    act(() => { fireEvent.click(showLinksToggle); });
+    // Toggle should now say "ON"
+    expect(showLinksToggle.textContent).toBe('ON');
 
     unmount();
 
@@ -994,29 +970,31 @@ describe('StudentEditor module-state bleed — activate/deactivate cycle', () =>
 
     // Re-activate and re-mount (simulates switching back)
     StudentEditor.activate(ctx);
-    render(<RightPanel ctx={ctx} />);
+    render(<StudentEditor.Toolbar ctx={ctx} />);
 
-    // The RightPanel should show "Show Links" (OFF), not "Links ON"
-    expect(screen.getByRole('button', { name: /show links/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /links on/i })).not.toBeInTheDocument();
+    // Open Settings menu again — Show Links should be OFF
+    const gearBtn2 = screen.getByTestId('settings-gear-button');
+    act(() => { fireEvent.click(gearBtn2); });
+    const showLinksToggle2 = screen.getByTestId('settings-show-links-toggle');
+    expect(showLinksToggle2.textContent).toBe('OFF');
   });
 
   it('deactivate resets assignerModeActive so no stale assigner flow on re-activate', () => {
-    const ctx = makeCtx();
-    StudentEditor.activate(ctx);
+    const alice = { id: makeSid('alice-bleed'), name: 'Alice', isFixture: false, preferences: [], metadata: {} };
+    const ctxWithStudent = makeCtx({ roster: [alice], selectedStudentId: alice.id });
+    StudentEditor.activate(ctxWithStudent);
 
-    // Mount the RightPanel and turn assigner mode ON
-    const RightPanel = StudentEditor.RightPanel!;
-    const { unmount } = render(<RightPanel ctx={ctx} />);
+    // Mount the SidePanel with a selected student and turn assigner mode ON
+    const { unmount } = render(<StudentEditor.SidePanel ctx={ctxWithStudent} />);
     act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
     // Assigner is now ON
     expect(screen.getByRole('button', { name: /assigner on/i })).toBeInTheDocument();
 
     unmount();
-    StudentEditor.deactivate(ctx);
+    StudentEditor.deactivate(ctxWithStudent);
 
     // After deactivate, any pointer event must NOT use the assigner flow
-    // (even before the RightPanel re-mounts, because the module var should be false).
+    // (even before the SidePanel re-mounts, because the module var should be false).
     // We just fire a pointer event and check setMutualPreference is NOT called.
     const ctxMock = makeCtx();
     (ctxMock.canvas.cellAt as ReturnType<typeof vi.fn>).mockReturnValue({ x: 0, y: 0 });

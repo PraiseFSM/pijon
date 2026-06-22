@@ -85,6 +85,60 @@ Status: Iterations 2 (§12) and 3 (§13) COMPLETE. Iteration 4 in progress.
   clickable at high G. Applied at all FurnitureEditor call sites (paint + both hit-test paths, kept
   in sync via the shared default); covered in `ghostRing.test.ts`.)
 
+### Iteration 5 — round-3 feedback (processed from feedback.txt, 2026-06-21)
+
+Conductor translation of the feedback into best-method tasks, in **bug → test → feature** order. Each
+core item gets a builder pass + a checker (hole-poke) pass with tests. Outline updated to match
+(Classroom building, Grid granularity, Seating, Settings, Preferences, Experience).
+
+**Cluster A — grid resize & granularity (Furniture editor). ✅ COMPLETE 2026-06-21.**
+Files: `domain/classroom.ts`, `ui/canvas/ghostRing.ts`, `ui/editors/FurnitureEditor.tsx`, `ui/App.tsx`.
+Done inline (sub-agent infra was overloaded); verified: full suite 1196 green, tsc + lint clean, build OK.
+- [x] **5.A1 Bug — desk can sit over the − button.** Added pure `canRemoveEdge(classroom, edge)`
+  (= `resizeGrid(c, edge, -1).ok`); FurnitureEditor's `removableButtons()` helper filters out − buttons
+  at non-shrinkable edges in BOTH paint and the two hit-test paths. Removal-illegal ⇒ no button ⇒ no
+  overlap. Tests in `gridFeatures.test.ts` (canRemoveEdge) + `iteration4_14_7.test.ts` updated.
+- [x] **5.A2 Minimum placeable area = 3×3 units (granularity-aware).** `resizeGrid` min guard is now
+  `3 * cellsPerUnit` per dimension (3×3 @G=1, 6×6 @G=2, 12×12 @G=4); reason strings updated. Tests added.
+- [x] **5.A3 Restrict granularity to {1, 2, 4}.** FurnitureToolbar integer input → 3-option selector
+  (1/2/4, aria-pressed); applies immediately; non-blocking warning retained. `polish_granularity.test.ts`
+  rewritten for the selector.
+- [x] **5.A4 Resize +/− buttons stay a constant 1×1 unit size.** `resizeButtonRects` takes `cellsPerUnit`;
+  button = `cellSize * cellsPerUnit` = baseUnitPx, flush to the boundary (PLUS outside, MINUS inside),
+  centered on the edge midpoint. `MIN_BUTTON_SIZE_PX` clamp removed. Ghost margin = one unit
+  (`ghostMargin = cellsPerUnit` in App). `ghostRing.test.ts` rewritten for one-unit sizing across G=1/2/4.
+
+**Cluster B — Students editor restructure (single left panel). ✅ COMPLETE 2026-06-22.**
+Builder + checker passes; verified full suite 1247 green, tsc + lint clean, build OK. No source defects;
+checker added 14 hardening tests (end-to-end weight, algorithm/variant, Show Links repaint, Import/Export
+guards, pref-removal dispatch split). Files: `ui/editors/StudentEditor.tsx`, `ui/shell/SettingsMenu.tsx`,
+new tests `src/test/clusterB.test.tsx` + `clusterB_harden.test.tsx`.
+- [x] **5.B1 Right panel removed; relocated into the left roster panel.** Selected student's summary +
+  preference list now render beneath that student (`data-testid="student-pref-detail"`). The shell
+  `RightPanel` wrapper is kept as an optional extension point (renders null; justified by checker).
+- [x] **5.B2 "Add preference" form removed.** Prefs added via assigner mode + drag only; ✕ remove kept.
+- [x] **5.B3 Weight selector {−2, −1, +1, +2}** in the top bar; drives `currentWeight`; `activate()` resets it.
+- [x] **5.B4 Top-bar:** single Allocate · Clear · Undo/Redo · weight selectors · Export(.pijon) ·
+  Import(.pijon) · Settings. Algorithm (Greedy/Random), allocate-vs-shuffle variant, and Show Links moved
+  into Settings; Export/Import wired to `persistence.saveToFile()`/`openFromFile()`; CSV roster import
+  stays in the roster panel.
+
+**Cluster C — feature. ✅ COMPLETE 2026-06-22.**
+Builder pass: feature was already fully wired (no source defects found); added 27 focused tests in
+`src/test/clusterC.test.tsx`. Full suite 1274 green, tsc + lint clean, build OK.
+Files: `ui/editors/StudentEditor.tsx`, new `src/test/clusterC.test.tsx`.
+- [x] **5.C1 Drag a name from the roster onto a desk** seats the student exactly like an inter-desk drag
+  (seat if empty, swap if occupied). Infra already present (`DRAG_STUDENT_ID_KEY`, draggable roster items,
+  `onDrop` reading the id) — verified end-to-end, no gaps found, 27 tests added covering all 5 behaviours
+  + text/plain fallback + stash lifecycle. Checker pass DONE: mutation-tested the suite (tests are
+  meaningful, not tautological), no source defects, one theoretical defense-in-depth note only.
+
+> **Iteration 5 COMPLETE (2026-06-22).** All three clusters shipped with builder + checker passes:
+> A (grid min 3×3-units, {1,2,4} granularity, hide invalid − buttons, one-unit resize buttons),
+> B (single-panel Students editor, {−2,−1,+1,+2} weight selector, toolbar w/ .pijon Export/Import,
+> algorithm+ShowLinks in Settings), C (roster drag-to-seat). Suite: **1274 tests green**, tsc + lint
+> clean, production PWA build OK.
+
 ## Deferred tests (write later)
 
 Tests were paused to conserve usage. Code below was shipped WITHOUT tests and needs an

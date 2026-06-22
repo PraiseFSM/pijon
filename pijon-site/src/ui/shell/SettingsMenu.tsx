@@ -5,11 +5,14 @@
  * (uses the same capture-phase window.pointerdown pattern as the context menu
  * in §12.1 — see StudentEditor.tsx StudentSidePanelWithMenu).
  *
- * Houses:
- *   §13.4  Nearness (units) — moves here from the main toolbar.
+ * Houses (§5.B4):
+ *   §13.4  Nearness (units) — proximity threshold.
  *           Reads/writes classroom.thresholdUnits via store.setThreshold().
- *   §13.5  Show Violations toggle — moves here from the main toolbar.
+ *   §13.5  Show Violations toggle — defaults to on.
  *           Reads/writes store.showViolations via store.setShowViolations().
+ *   §5.B4  Algorithm choice (Greedy / Random) — moved here from the split-button.
+ *   §5.B4  Action variant (Allocate / Smart Shuffle) — moved here from the split-button.
+ *   §5.B4  Show Links toggle — moved here from the old RightPanel.
  *
  * Design decisions:
  *   - Nearness is stored on the Classroom (per-project): thresholdUnits is the
@@ -17,6 +20,8 @@
  *     allocate, violation overlay, and neighbor preview.
  *   - showViolations is app-level UI state (not per-project): teachers expect
  *     "I always want to see violations" without it toggling per class.
+ *   - Algorithm, variant, and showLinks are callbacks passed in from the toolbar
+ *     so their state lives in the toolbar (single owner).
  *   - Menu open/close is local React state; no store involvement.
  *
  * LOCAL-FIRST: no fetch(), no XHR, no WebSocket.
@@ -47,6 +52,16 @@ import {
 } from '../../theme/colors.js';
 
 // ---------------------------------------------------------------------------
+// Types for algorithm / variant (exported so StudentEditor can use them)
+// ---------------------------------------------------------------------------
+
+/** Identifies a registered seating algorithm. */
+export type AlgorithmId = string;
+
+/** The two action variants: seat from scratch vs. respect locks. */
+export type ActionVariant = 'allocate' | 'smart_shuffle';
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -56,6 +71,23 @@ interface SettingsMenuProps {
   open: boolean;
   /** Called when the popover requests to close (click-outside or user action). */
   onClose: () => void;
+
+  // --- §5.B4 additions: algorithm / variant / showLinks live here now ---
+
+  /** Currently selected algorithm id (e.g. 'greedy'). */
+  algorithmId: AlgorithmId;
+  /** Called when the user picks a different algorithm. */
+  onChangeAlgorithm: (id: AlgorithmId) => void;
+
+  /** Currently selected action variant. */
+  variant: ActionVariant;
+  /** Called when the user picks a different variant. */
+  onChangeVariant: (v: ActionVariant) => void;
+
+  /** Whether preference links are shown on the canvas. */
+  showLinks: boolean;
+  /** Called when the user toggles the Show Links switch. */
+  onToggleShowLinks: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +99,17 @@ interface SettingsMenuProps {
  * div anchored below the gear button in the toolbar. The caller controls
  * open/close state.
  */
-export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }) => {
+export const SettingsMenu: React.FC<SettingsMenuProps> = ({
+  ctx,
+  open,
+  onClose,
+  algorithmId,
+  onChangeAlgorithm,
+  variant,
+  onChangeVariant,
+  showLinks,
+  onToggleShowLinks,
+}) => {
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Read settings from the store (reactive)
@@ -140,6 +182,27 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
     flexShrink: 0,
   });
 
+  const radioRow: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '2px 0',
+    cursor: 'pointer',
+    userSelect: 'none',
+    fontSize: '0.8rem',
+    color: textDark,
+  };
+
+  const sectionTitle: React.CSSProperties = {
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    color: settingsHeaderText,
+    marginBottom: 4,
+    marginTop: 4,
+  };
+
   if (!open) return null;
 
   return (
@@ -155,7 +218,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
         border: `1px solid ${settingsPopoverBorder}`,
         borderRadius: 6,
         boxShadow: `0 4px 16px ${settingsPopoverShadow}`,
-        minWidth: 240,
+        minWidth: 260,
         padding: '10px 14px 12px',
         marginTop: 2,
       }}
@@ -175,6 +238,63 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
       >
         Settings
       </div>
+
+      {/* §5.B4 — Algorithm choice */}
+      <div style={{ marginBottom: 4 }}>
+        <div style={sectionTitle}>Algorithm</div>
+        {(['greedy', 'bogo'] as const).map((id) => (
+          <label key={id} style={radioRow}>
+            <input
+              type="radio"
+              name="settings-algorithm"
+              value={id}
+              checked={algorithmId === id}
+              onChange={() => { onChangeAlgorithm(id); }}
+              data-testid={`settings-algorithm-${id}`}
+            />
+            {id === 'greedy' ? 'Greedy' : 'Random'}
+          </label>
+        ))}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${dividerLight}`, margin: '4px 0' }} />
+
+      {/* §5.B4 — Action variant */}
+      <div style={{ marginBottom: 4 }}>
+        <div style={sectionTitle}>Allocate action</div>
+        {(['allocate', 'smart_shuffle'] as const).map((v) => (
+          <label key={v} style={radioRow}>
+            <input
+              type="radio"
+              name="settings-variant"
+              value={v}
+              checked={variant === v}
+              onChange={() => { onChangeVariant(v); }}
+              data-testid={`settings-variant-${v}`}
+            />
+            {v === 'allocate' ? 'Allocate (from scratch)' : 'Smart Shuffle (keep locks)'}
+          </label>
+        ))}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${dividerLight}`, margin: '4px 0' }} />
+
+      {/* §5.B4 — Show Links toggle (moved from RightPanel) */}
+      <div style={rowStyle}>
+        <span style={labelStyle}>Show Links:</span>
+        <button
+          type="button"
+          data-testid="settings-show-links-toggle"
+          onClick={onToggleShowLinks}
+          style={toggleStyle(showLinks)}
+          title="Draw preference links between currently seated students"
+          aria-pressed={showLinks}
+        >
+          {showLinks ? 'ON' : 'OFF'}
+        </button>
+      </div>
+
+      <div style={{ borderTop: `1px solid ${dividerLight}`, margin: '4px 0' }} />
 
       {/* Nearness (units) */}
       <div style={rowStyle}>
@@ -199,7 +319,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
         />
       </div>
 
-      {/* Divider */}
       <div style={{ borderTop: `1px solid ${dividerLight}`, margin: '4px 0' }} />
 
       {/* Show violations toggle */}
@@ -211,6 +330,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ ctx, open, onClose }
           onClick={handleToggleViolations}
           style={toggleStyle(showViolations)}
           title="Highlight desks with avoid-preference violations"
+          aria-pressed={showViolations}
         >
           {showViolations ? 'ON' : 'OFF'}
         </button>

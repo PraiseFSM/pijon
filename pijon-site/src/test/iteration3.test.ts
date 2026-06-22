@@ -635,6 +635,20 @@ const makeCtx = (storeOverrides?: Partial<Store>): EditorContext => ({
   persistence: null,
 });
 
+/**
+ * §5.B4 — SettingsMenu now requires algorithm/variant/showLinks props (owned by the toolbar).
+ * Helper builds the extra required props with sensible defaults for tests that only care
+ * about nearness/violations behaviour.
+ */
+const makeSettingsMenuBaseProps = () => ({
+  algorithmId: 'greedy',
+  onChangeAlgorithm: vi.fn(),
+  variant: 'allocate' as const,
+  onChangeVariant: vi.fn(),
+  showLinks: false,
+  onToggleShowLinks: vi.fn(),
+});
+
 // The SettingsMenu reads from the Zustand store via usePijonStore selector.
 // We need to prime the store before rendering.
 function primeStore(overrides?: { thresholdUnits?: number; showViolations?: boolean }) {
@@ -653,7 +667,7 @@ describe('SettingsMenu — open/close', () => {
   it('is not visible when open=false', () => {
     const ctx = makeCtx();
     render(
-      React.createElement(SettingsMenu, { ctx, open: false, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: false, onClose: vi.fn() }),
     );
     expect(screen.queryByTestId('settings-menu')).toBeNull();
   });
@@ -661,7 +675,7 @@ describe('SettingsMenu — open/close', () => {
   it('is visible when open=true', () => {
     const ctx = makeCtx();
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     expect(screen.getByTestId('settings-menu')).toBeTruthy();
   });
@@ -669,7 +683,7 @@ describe('SettingsMenu — open/close', () => {
   it('contains the nearness input', () => {
     const ctx = makeCtx();
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     expect(screen.getByTestId('settings-nearness-input')).toBeTruthy();
   });
@@ -677,7 +691,7 @@ describe('SettingsMenu — open/close', () => {
   it('contains the violations toggle', () => {
     const ctx = makeCtx();
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     expect(screen.getByTestId('settings-violations-toggle')).toBeTruthy();
   });
@@ -712,7 +726,7 @@ describe('SettingsMenu — violations toggle drives store', () => {
   it('shows ON when showViolations=true in store', () => {
     const ctx = makeCtx();
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     const toggle = screen.getByTestId('settings-violations-toggle');
     expect(toggle.textContent).toBe('ON');
@@ -722,7 +736,7 @@ describe('SettingsMenu — violations toggle drives store', () => {
     primeStore({ showViolations: false });
     const ctx = makeCtx();
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     const toggle = screen.getByTestId('settings-violations-toggle');
     expect(toggle.textContent).toBe('OFF');
@@ -737,7 +751,7 @@ describe('SettingsMenu — violations toggle drives store', () => {
       persistence: null,
     };
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     fireEvent.click(screen.getByTestId('settings-violations-toggle'));
     expect(setShowViolations).toHaveBeenCalledWith(false); // was true, flip to false
@@ -752,7 +766,7 @@ describe('SettingsMenu — nearness input drives store', () => {
     primeStore({ thresholdUnits: 3.0 });
     const ctx = makeCtx();
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     const input = screen.getByTestId<HTMLInputElement>('settings-nearness-input');
     expect(parseFloat(input.value)).toBe(3.0);
@@ -767,7 +781,7 @@ describe('SettingsMenu — nearness input drives store', () => {
       persistence: null,
     };
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     const input = screen.getByTestId('settings-nearness-input');
     fireEvent.change(input, { target: { value: '2.5' } });
@@ -783,7 +797,7 @@ describe('SettingsMenu — nearness input drives store', () => {
       persistence: null,
     };
     render(
-      React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }),
+      React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose: vi.fn() }),
     );
     const input = screen.getByTestId('settings-nearness-input');
     fireEvent.change(input, { target: { value: '-1' } });
@@ -803,7 +817,7 @@ describe('SettingsMenu — click-outside closes', () => {
     render(
       React.createElement('div', null,
         React.createElement('div', { 'data-testid': 'outside' }, 'outside'),
-        React.createElement(SettingsMenu, { ctx, open: true, onClose }),
+        React.createElement(SettingsMenu, { ...makeSettingsMenuBaseProps(), ctx, open: true, onClose }),
       ),
     );
     expect(screen.getByTestId('settings-menu')).toBeTruthy();

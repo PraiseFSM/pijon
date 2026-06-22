@@ -199,12 +199,13 @@ export default function App() {
               boxShadow: `0 1px 4px ${canvasCardShadow}`,
             }}
           >
-            {/* §14.7 — ghostMargin=1 in Furniture mode adds a 1-cell border
-                 around the canvas so PLUS resize buttons live outside the grid. */}
+            {/* §14.7 / 5.A4 — in Furniture mode the ghost ring is ONE UNIT wide
+                 (cellsPerUnit cells) so the one-unit PLUS resize buttons live
+                 fully outside the grid at any granularity. */}
             <ClassroomCanvas
               editor={activeEditor}
               cellSize={48}
-              ghostMargin={activeEditor.id === 'furniture' ? 1 : 0}
+              ghostMargin={activeEditor.id === 'furniture' ? store.classroom.cellsPerUnit : 0}
               onViewReady={handleViewReady}
             />
           </div>

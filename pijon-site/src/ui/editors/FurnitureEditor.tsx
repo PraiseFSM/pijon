@@ -42,9 +42,26 @@ import type { Furniture } from '../../domain/furniture.js';
 import { occupiedCells } from '../../domain/furniture.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
 import { resizeButtonRects, hitButton, ghostRingCells, type ResizeButton } from '../canvas/ghostRing.js';
+import { usePijonStore } from '../../state/store.js';
 import { getImage } from '../canvas/imageCache.js';
 import { furnitureAssetUrl, ASSET } from '../../assets/paths.js';
-import { makeClassroom } from '../../domain/classroom.js';
+import { makeClassroom, canRemoveEdge } from '../../domain/classroom.js';
+import type { Classroom } from '../../domain/classroom.js';
+
+/**
+ * 5.A1 — Filter the resize buttons so a MINUS (remove) button is shown only at
+ * edges where removing a row/column is actually valid (`canRemoveEdge`). PLUS
+ * (add) buttons are always kept. Used identically by the paint and both
+ * hit-test paths so a hidden button is never clickable — and a desk can never
+ * sit on top of a − button, because the button isn't drawn when that edge's
+ * row/column is occupied.
+ */
+function removableButtons(
+  buttons: readonly ResizeButton[],
+  classroom: Classroom,
+): readonly ResizeButton[] {
+  return buttons.filter((b) => b.sign === 1 || canRemoveEdge(classroom, b.edge));
+}
 import { GridColorButton, GridColorPickerPopover } from './GridColorPicker.js';
 import {
   toolbarBackground,
@@ -323,26 +340,6 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const classroom = ctx.store.classroom;
 
   /**
-   * §polish Fix 3 — keep granularityInput in sync with store.
-   *
-   * We store both the input value AND the last store value we initialized from.
-   * On each render, if the store's cellsPerUnit has changed since we last synced
-   * (indicating an external update like a project hydrate), we derive a fresh
-   * input value directly from the store rather than running an effect.
-   *
-   * This is the "derived state" pattern: avoids useEffect+setState which ESLint
-   * flags as `react-hooks/set-state-in-effect` (cascading renders).
-   */
-  const [syncedCellsPerUnit, setSyncedCellsPerUnit] = useState(classroom.cellsPerUnit);
-  const [granularityInput, setGranularityInput] = useState(classroom.cellsPerUnit);
-
-  if (classroom.cellsPerUnit !== syncedCellsPerUnit) {
-    // The store changed externally (hydrate, file open, etc.) — reset the input.
-    setSyncedCellsPerUnit(classroom.cellsPerUnit);
-    setGranularityInput(classroom.cellsPerUnit);
-  }
-
-  /**
    * §polish Fix 2 — non-blocking granularity error banner.
    * Set when the user tries to apply an invalid granularity; cleared on success.
    */
@@ -383,35 +380,24 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     void ctx.persistence.openFromFile();
   };
 
-  const handleGranularityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = parseInt(e.target.value, 10);
-    if (!Number.isFinite(v) || v < 1) return;
-    setGranularityInput(v);
-  };
-
-  const handleGranularityApply = () => {
-    if (granularityInput === classroom.cellsPerUnit) return;
+  // 5.A3 — granularity is restricted to {1, 2, 4} (powers of two, so every
+  // transition between allowed values is a clean multiple/divisor and
+  // setGranularity never rejects on divisibility between them). Applied
+  // immediately on select; the non-blocking banner surfaces the rare case where
+  // scaling back down rejects (furniture not on a coarse-unit boundary).
+  const handleGranularitySelect = (g: number) => {
+    if (g === classroom.cellsPerUnit) return;
     try {
-      ctx.store.setGranularity(granularityInput);
-      // Clear any prior granularity warning on success
+      ctx.store.setGranularity(g);
       setGranularityWarning(null);
       ctx.canvas.requestRepaint();
     } catch (err) {
-      // §polish Fix 2 — surface a friendly, non-blocking banner instead of alert().
-      // The domain setGranularity throws RangeError when the grid dimensions don't
-      // divide evenly by the requested granularity.
       const msg =
         err instanceof Error
           ? err.message
-          : `Can't set granularity to ${granularityInput.toString()} — please try a value that divides the grid evenly.`;
+          : `Can't set granularity to ${g.toString()} — move furniture onto unit boundaries first.`;
       setGranularityWarning(msg);
-      // Reset the input to the currently-active granularity
-      setGranularityInput(classroom.cellsPerUnit);
     }
-  };
-
-  const handleGranularityKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') handleGranularityApply();
   };
 
   /** §14.5 — Handle live grid color changes from the picker (onInput = continuous). */
@@ -529,36 +515,33 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 
         {sep}
 
-        {/* Granularity */}
+        {/* Granularity — restricted to {1, 2, 4} (5.A3) */}
         <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>Granularity:</span>
-        <input
-          type="number"
-          min="1"
-          max="16"
-          step="1"
-          value={granularityInput}
-          onChange={handleGranularityChange}
-          onBlur={handleGranularityApply}
-          onKeyDown={handleGranularityKeyDown}
-          style={{
-            width: 46,
-            padding: '2px 4px',
-            borderRadius: 4,
-            border: '1px solid #bbb',
-            fontSize: '0.8rem',
-            textAlign: 'center',
-          }}
-          title={`Fine cells per unit (current: ${classroom.cellsPerUnit.toString()}). Changing scales furniture positions/sizes so physical layout is unchanged.`}
-        />
-        <button
-          type="button"
-          style={{ ...btn, fontSize: '0.78rem' }}
-          onClick={handleGranularityApply}
-          title="Apply granularity change"
-          disabled={granularityInput === classroom.cellsPerUnit}
-        >
-          Apply
-        </button>
+        <div style={{ display: 'inline-flex', gap: 2 }} role="group" aria-label="Grid granularity">
+          {[1, 2, 4].map((g) => {
+            const active = classroom.cellsPerUnit === g;
+            return (
+              <button
+                key={g}
+                type="button"
+                aria-pressed={active}
+                onClick={() => { handleGranularitySelect(g); }}
+                title={`Fine cells per unit: ${g.toString()}. Changing scales furniture so the physical layout is unchanged.`}
+                style={{
+                  ...btn,
+                  fontSize: '0.78rem',
+                  minWidth: 26,
+                  fontWeight: active ? 700 : 400,
+                  background: active ? '#e3f2fd' : btnBackground,
+                  borderColor: active ? '#1565c0' : btnBorder,
+                  color: active ? '#0d47a1' : textDark,
+                }}
+              >
+                {g}
+              </button>
+            );
+          })}
+        </div>
 
         {sep}
 
@@ -801,7 +784,12 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
     }
 
     // --- Resize buttons (PLUS outside, MINUS inside) ---
-    const buttons = resizeButtonRects(view.gridW, view.gridH, cs, view.originOffset);
+    // 5.A1 — only show − buttons at edges that can validly shrink.
+    const ringClassroom = usePijonStore.getState().classroom;
+    const buttons = removableButtons(
+      resizeButtonRects(view.gridW, view.gridH, cs, view.originOffset, ringClassroom.cellsPerUnit),
+      ringClassroom,
+    );
 
     ctx2d.textAlign = 'center';
     ctx2d.textBaseline = 'middle';
@@ -1016,11 +1004,15 @@ export const FurnitureEditor: EditorMode = {
         const canvasRect = getRect.call(t);
         const canvasPx = e.clientX - canvasRect.left;
         const canvasPy = e.clientY - canvasRect.top;
-        const buttons = resizeButtonRects(
-          ctx.canvas.gridW,
-          ctx.canvas.gridH,
-          ctx.canvas.cellSize,
-          ctx.canvas.originOffset,
+        const buttons = removableButtons(
+          resizeButtonRects(
+            ctx.canvas.gridW,
+            ctx.canvas.gridH,
+            ctx.canvas.cellSize,
+            ctx.canvas.originOffset,
+            ctx.store.classroom.cellsPerUnit,
+          ),
+          ctx.store.classroom,
         );
         const hit = hitButton(canvasPx, canvasPy, buttons);
         if (hit !== undefined) {
@@ -1082,11 +1074,15 @@ export const FurnitureEditor: EditorMode = {
         const canvasRect = getMoveRect.call(tm);
         const canvasPx = e.clientX - canvasRect.left;
         const canvasPy = e.clientY - canvasRect.top;
-        const buttons = resizeButtonRects(
-          ctx.canvas.gridW,
-          ctx.canvas.gridH,
-          ctx.canvas.cellSize,
-          ctx.canvas.originOffset,
+        const buttons = removableButtons(
+          resizeButtonRects(
+            ctx.canvas.gridW,
+            ctx.canvas.gridH,
+            ctx.canvas.cellSize,
+            ctx.canvas.originOffset,
+            ctx.store.classroom.cellsPerUnit,
+          ),
+          ctx.store.classroom,
         );
         const hit = hitButton(canvasPx, canvasPy, buttons) ?? null;
         const prevHovered = hoveredButton;

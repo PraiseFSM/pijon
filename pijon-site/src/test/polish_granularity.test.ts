@@ -117,12 +117,14 @@ describe('Fix 2: granularity error banner (non-blocking)', () => {
     vi.spyOn(window, 'alert').mockImplementation(() => { /* no-op */ });
   });
 
+  // 5.A3 — granularity is now a {1,2,4} selector (no number input / Apply button).
+  // Selecting an option applies immediately; the banner surfaces a domain throw.
   it('shows the granularity warning banner when setGranularity throws', () => {
     const store = makeStore({
-      classroom: makeClassroomWith(1, 10, 8), // G=1, gridW=10, gridH=8
+      classroom: makeClassroomWith(1, 10, 8), // active G=1
       setGranularity: vi.fn().mockImplementation(() => {
         throw new RangeError(
-          'Cannot change granularity from 1 to 3: value 10 does not scale to an integer.',
+          'Cannot change granularity from 1 to 2: value 10 does not scale to an integer.',
         );
       }),
     });
@@ -130,13 +132,8 @@ describe('Fix 2: granularity error banner (non-blocking)', () => {
 
     render(React.createElement(FurnitureToolbar, { ctx }));
 
-    // Change the granularity input to 3 (invalid for 10×8 grid from G=1)
-    const input = screen.getByRole('spinbutton');
-    fireEvent.change(input, { target: { value: '3' } });
-
-    // Click Apply
-    const applyBtn = screen.getByRole('button', { name: /apply/i });
-    fireEvent.click(applyBtn);
+    // Select granularity 2 (different from the active 1) → handler calls setGranularity → throws
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
 
     // Banner should be visible with a warning message
     expect(screen.getByText(/cannot change granularity/i)).toBeInTheDocument();
@@ -145,9 +142,9 @@ describe('Fix 2: granularity error banner (non-blocking)', () => {
     expect(window.alert).not.toHaveBeenCalled();
   });
 
-  it('does NOT change classroom when an invalid granularity is applied', () => {
+  it('does NOT change classroom when an invalid granularity is selected', () => {
     const mockSetGranularity = vi.fn().mockImplementation(() => {
-      throw new RangeError('Cannot change granularity from 1 to 3.');
+      throw new RangeError('Cannot change granularity from 1 to 2.');
     });
     const classroom = makeClassroomWith(1, 10, 8);
     const store = makeStore({
@@ -158,17 +155,13 @@ describe('Fix 2: granularity error banner (non-blocking)', () => {
 
     render(React.createElement(FurnitureToolbar, { ctx }));
 
-    const input = screen.getByRole('spinbutton');
-    fireEvent.change(input, { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
 
-    // classroom reference is unchanged — store.setGranularity would have needed
-    // to succeed to update it. Since it threw, the ctx.store.classroom is still
-    // the original (mock doesn't mutate).
+    // setGranularity threw → mock did not mutate → classroom reference unchanged.
     expect(store.classroom).toBe(classroom);
   });
 
-  it('clears the granularity warning on a successful apply', () => {
+  it('clears the granularity warning on a successful selection', () => {
     let callCount = 0;
     const store = makeStore({
       classroom: makeClassroomWith(1, 10, 8),
@@ -176,27 +169,21 @@ describe('Fix 2: granularity error banner (non-blocking)', () => {
       setGranularity: vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
-          throw new RangeError('Cannot change granularity from 1 to 3.');
+          throw new RangeError('Cannot change granularity from 1 to 2.');
         }
-        // On second call, succeed silently (mock doesn't need to mutate state here)
+        // On second call, succeed silently (mock doesn't mutate state here)
       }),
     });
     const ctx: EditorContext = { store, canvas: makeCanvas(), persistence: null };
 
     render(React.createElement(FurnitureToolbar, { ctx }));
 
-    const input = screen.getByRole('spinbutton');
-
-    // First: invalid apply → warning appears
-    fireEvent.change(input, { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    // First: select 2 → throws → warning appears
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
     expect(screen.getByText(/cannot change granularity/i)).toBeInTheDocument();
 
-    // Second: valid apply (G=2) → warning disappears
-    // Need to reset the input value (after first failure it reverted to 1;
-    // now try G=2 which our mock will accept on the second call)
-    fireEvent.change(input, { target: { value: '2' } });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    // Second: select 4 (still differs from active G=1) → succeeds → warning clears
+    fireEvent.click(screen.getByRole('button', { name: '4' }));
     expect(screen.queryByText(/cannot change granularity/i)).not.toBeInTheDocument();
   });
 
@@ -204,22 +191,19 @@ describe('Fix 2: granularity error banner (non-blocking)', () => {
     const store = makeStore({
       classroom: makeClassroomWith(1, 10, 8),
       setGranularity: vi.fn().mockImplementation(() => {
-        throw new RangeError('Cannot change granularity from 1 to 3.');
+        throw new RangeError('Cannot change granularity from 1 to 2.');
       }),
     });
     const ctx: EditorContext = { store, canvas: makeCanvas(), persistence: null };
 
     render(React.createElement(FurnitureToolbar, { ctx }));
 
-    const input = screen.getByRole('spinbutton');
-    fireEvent.change(input, { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
 
     // Banner visible
     expect(screen.getByText(/cannot change granularity/i)).toBeInTheDocument();
 
     // Find and click the dismiss button (✕)
-    // It's rendered as a button with text "✕" near the warning
     const dismissBtn = screen.getAllByRole('button').find((b) => b.textContent === '✕');
     expect(dismissBtn).toBeDefined();
     fireEvent.click(dismissBtn!);
@@ -267,26 +251,25 @@ describe('Fix 2: granularity error banner (non-blocking)', () => {
 // Fix 3 — granularity input stays in sync with store cellsPerUnit
 // ---------------------------------------------------------------------------
 
-describe('Fix 3: granularityInput syncs with store.classroom.cellsPerUnit', () => {
-  it('shows the initial cellsPerUnit from the store', () => {
+describe('Fix 3: granularity selector reflects store.classroom.cellsPerUnit (5.A3)', () => {
+  it('marks the active option (aria-pressed) from the store', () => {
     const store = makeStore({ classroom: makeClassroomWith(2, 20, 16) });
     const ctx: EditorContext = { store, canvas: makeCanvas(), persistence: null };
 
     render(React.createElement(FurnitureToolbar, { ctx }));
 
-    // getByDisplayValue queries the *live* input value (works for controlled React inputs)
-    expect(screen.getByDisplayValue('2')).toBeInTheDocument();
+    // Option 2 is active; 1 and 4 are not.
+    expect(screen.getByRole('button', { name: '2', pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1', pressed: false })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '4', pressed: false })).toBeInTheDocument();
   });
 
-  it('updates the displayed granularity when cellsPerUnit changes in the store (hydrate)', () => {
-    // Start with G=1
+  it('updates the active option when cellsPerUnit changes in the store (hydrate)', () => {
     const store = makeStore({ classroom: makeClassroomWith(1, 10, 8) });
     const ctx: EditorContext = { store, canvas: makeCanvas(), persistence: null };
 
     const { rerender } = render(React.createElement(FurnitureToolbar, { ctx }));
-
-    // Confirm initial value is 1
-    expect(screen.getByDisplayValue('1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1', pressed: true })).toBeInTheDocument();
 
     // Simulate a project hydrate: classroom.cellsPerUnit changes to 2
     const newStore = makeStore({ classroom: makeClassroomWith(2, 20, 16) });
@@ -296,9 +279,9 @@ describe('Fix 3: granularityInput syncs with store.classroom.cellsPerUnit', () =
       rerender(React.createElement(FurnitureToolbar, { ctx: newCtx }));
     });
 
-    // After hydrate: input must show 2, not the stale 1
-    expect(screen.getByDisplayValue('2')).toBeInTheDocument();
-    expect(screen.queryByDisplayValue('1')).not.toBeInTheDocument();
+    // After hydrate: option 2 is active, option 1 no longer pressed
+    expect(screen.getByRole('button', { name: '2', pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1', pressed: false })).toBeInTheDocument();
   });
 
   it('updates to G=4 when store cellsPerUnit changes to 4', () => {
@@ -314,6 +297,6 @@ describe('Fix 3: granularityInput syncs with store.classroom.cellsPerUnit', () =
       rerender(React.createElement(FurnitureToolbar, { ctx: newCtx }));
     });
 
-    expect(screen.getByDisplayValue('4')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '4', pressed: true })).toBeInTheDocument();
   });
 });

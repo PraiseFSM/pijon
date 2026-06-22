@@ -37,31 +37,18 @@
  *   PLUS top  → pixel rect at canvas (originOffset + floor(gridW/2)) * cellSize, (originOffset - 1) * cellSize
  *   MINUS top → pixel rect at canvas (originOffset + floor(gridW/2)) * cellSize, (originOffset + 0) * cellSize
  *
- * Minimum button size
- * -------------------
- * At high granularity G the effective cell size shrinks to baseUnitPx/G, making
- * buttons as small as 3–6 px and nearly unclickable.  resizeButtonRects accepts
- * a `minButtonSize` parameter (default: MIN_BUTTON_SIZE_PX = 16).  When the cell
- * size is smaller than this minimum the button rect is clamped to minButtonSize and
- * CENTERED on the cell's center point (option (a) — visual rect = hit rect).
- * At G=1 the cell is already ≥ min so behavior is unchanged.
+ * Button size (5.A4)
+ * ------------------
+ * Each button is exactly ONE UNIT square: `cellSize * cellsPerUnit`. Since
+ * effectiveCellSize = baseUnitPx / cellsPerUnit, this equals baseUnitPx — a
+ * constant physical size regardless of granularity, just like furniture keeps
+ * its real size as the grid densifies. Buttons sit flush to the grid boundary
+ * (PLUS outside in the one-unit ghost ring, MINUS just inside the edge).
  *
  * LOCAL-FIRST: no network calls.
  */
 
 import type { GridEdge } from '../../domain/classroom.js';
-
-// ---------------------------------------------------------------------------
-// Minimum button size — ensures buttons remain clickable at high granularity
-// ---------------------------------------------------------------------------
-
-/**
- * Minimum hit/render size for ghost-ring resize buttons, in canvas pixels.
- * When `cellSize` is smaller than this value the button rect is clamped to
- * this size and centered on the cell center.  At G=1 (default) cellSize is
- * always ≥ this value so the clamping never activates.
- */
-export const MIN_BUTTON_SIZE_PX = 16;
 
 // ---------------------------------------------------------------------------
 // ResizeButton — the output type of resizeButtonRects
@@ -93,39 +80,28 @@ export interface ResizeButton {
  *
  * Returns one PLUS + one MINUS button for each of the 4 edges (8 total).
  *
- * Each button nominally occupies ONE full cell.  When `cellSize` is smaller
- * than `minButtonSize` (default: MIN_BUTTON_SIZE_PX = 16) the button rect is
- * clamped to `minButtonSize × minButtonSize` and **centered** on the cell's
- * center point so it remains visible and clickable at high granularity.
- * Both the visual rect and the hit-test rect use the same clamped dimensions
- * (option (a)) so callers need only one set of rects for both purposes.
- *
- * At G=1 the cell size is always ≥ minButtonSize so clamping never activates
- * and behavior is identical to previous implementations.
- *
- * Buttons are centered on the edge:
- *   - For top/bottom (horizontal) edges: centered at column floor(gridW / 2).
- *   - For left/right (vertical) edges: centered at row floor(gridH / 2).
+ * Each button is ONE UNIT square (`cellSize * cellsPerUnit` = baseUnitPx), a
+ * constant physical size across granularity (5.A4). Buttons are centered on the
+ * midpoint of their edge and flush to the grid boundary: PLUS entirely outside
+ * the grid (in the one-unit ghost ring), MINUS entirely inside the edge. The
+ * same rect is used for drawing and hit-testing.
  *
  * @param gridW          classroom column count
  * @param gridH          classroom row count
- * @param cellSize       CSS pixels per cell
- * @param originOffset   ghost-margin offset in cells (number of ghost cells on
- *                       each side); the grid content starts at
- *                       `(originOffset * cellSize, originOffset * cellSize)`.
- *                       Pass 0 for no ghost margin (buttons would be on the
- *                       canvas edge — only used in tests; in production this is
- *                       always ≥ 1 in Furniture mode).
- * @param minButtonSize  minimum rendered/hit size in pixels (default: MIN_BUTTON_SIZE_PX).
- *                       When cellSize < minButtonSize the button rect is clamped
- *                       to this size and centered on the cell center.
+ * @param cellSize       effective (fine) pixels per cell
+ * @param originOffset   ghost-margin offset in cells (the grid content starts at
+ *                       `(originOffset * cellSize, originOffset * cellSize)`).
+ *                       In Furniture mode this is one unit (= cellsPerUnit cells)
+ *                       so the ring contains a one-unit PLUS button. Pass 0 for
+ *                       no ghost margin (tests only).
+ * @param cellsPerUnit   grid granularity G (default 1); button size = cellSize × G.
  */
 export function resizeButtonRects(
   gridW: number,
   gridH: number,
   cellSize: number,
   originOffset: number,
-  minButtonSize: number = MIN_BUTTON_SIZE_PX,
+  cellsPerUnit = 1,
 ): readonly ResizeButton[] {
   const op = originOffset; // alias for clarity
 
@@ -135,98 +111,37 @@ export function resizeButtonRects(
   const gridRight  = gridLeft + gridW * cellSize;
   const gridBottom = gridTop  + gridH * cellSize;
 
-  // Center column index for horizontal (top/bottom) buttons
-  const hCenterCol = Math.floor(gridW / 2);
-  // Center row index for vertical (left/right) buttons
-  const vCenterRow = Math.floor(gridH / 2);
+  // 5.A4 — a button is exactly ONE UNIT square (cellSize × cellsPerUnit). Because
+  // effectiveCellSize = baseUnitPx / cellsPerUnit, this equals baseUnitPx — a
+  // constant physical size across granularity, just like furniture. Buttons sit
+  // FLUSH to the grid boundary, centered on the edge: PLUS entirely OUTSIDE (in
+  // the one-unit ghost ring), MINUS entirely INSIDE the edge.
+  const btn = cellSize * cellsPerUnit;
 
-  // Effective button size: at least minButtonSize, at most cellSize.
-  const btnSize = Math.max(cellSize, minButtonSize);
+  // Edge midpoints (center of the grid span on each axis), in canvas pixels.
+  const midX = gridLeft + (gridW * cellSize) / 2;
+  const midY = gridTop  + (gridH * cellSize) / 2;
+  const hx = midX - btn / 2; // left of a top/bottom button
+  const vy = midY - btn / 2; // top of a left/right button
 
-  /**
-   * Build a clamped, centered button rect given the cell's top-left corner
-   * (the "natural" x,y the button would occupy if it were exactly cellSize).
-   * When cellSize >= minButtonSize: w=h=cellSize, x/y unchanged.
-   * When cellSize <  minButtonSize: w=h=btnSize, x/y shifted to center on cell.
-   */
-  function makeRect(
-    naturalX: number,
-    naturalY: number,
-    edge: GridEdge,
-    sign: 1 | -1,
-  ): ResizeButton {
-    // Cell center in canvas pixels
-    const cx = naturalX + cellSize / 2;
-    const cy = naturalY + cellSize / 2;
-    return {
-      edge,
-      sign,
-      x: cx - btnSize / 2,
-      y: cy - btnSize / 2,
-      w: btnSize,
-      h: btnSize,
-    };
+  function rect(x: number, y: number, edge: GridEdge, sign: 1 | -1): ResizeButton {
+    return { edge, sign, x, y, w: btn, h: btn };
   }
 
-  const buttons: ResizeButton[] = [];
-
-  // ---- TOP edge ----------------------------------------------------------
-  // PLUS: one cell ABOVE the grid (in the ghost ring)
-  buttons.push(makeRect(
-    gridLeft + hCenterCol * cellSize,
-    gridTop - cellSize,           // one cell above the grid
-    'top', 1,
-  ));
-  // MINUS: first row of the grid (top-center interior cell)
-  buttons.push(makeRect(
-    gridLeft + hCenterCol * cellSize,
-    gridTop,                      // row 0 of the grid
-    'top', -1,
-  ));
-
-  // ---- BOTTOM edge -------------------------------------------------------
-  // PLUS: one cell BELOW the grid
-  buttons.push(makeRect(
-    gridLeft + hCenterCol * cellSize,
-    gridBottom,                   // just below the last row
-    'bottom', 1,
-  ));
-  // MINUS: last row of the grid (bottom-center interior cell)
-  buttons.push(makeRect(
-    gridLeft + hCenterCol * cellSize,
-    gridBottom - cellSize,        // row gridH-1
-    'bottom', -1,
-  ));
-
-  // ---- LEFT edge ---------------------------------------------------------
-  // PLUS: one cell to the LEFT of the grid
-  buttons.push(makeRect(
-    gridLeft - cellSize,          // one cell left of the grid
-    gridTop + vCenterRow * cellSize,
-    'left', 1,
-  ));
-  // MINUS: first column of the grid (left-center interior cell)
-  buttons.push(makeRect(
-    gridLeft,                     // col 0 of the grid
-    gridTop + vCenterRow * cellSize,
-    'left', -1,
-  ));
-
-  // ---- RIGHT edge --------------------------------------------------------
-  // PLUS: one cell to the RIGHT of the grid
-  buttons.push(makeRect(
-    gridRight,                    // just right of the last column
-    gridTop + vCenterRow * cellSize,
-    'right', 1,
-  ));
-  // MINUS: last column of the grid (right-center interior cell)
-  buttons.push(makeRect(
-    gridRight - cellSize,         // col gridW-1
-    gridTop + vCenterRow * cellSize,
-    'right', -1,
-  ));
-
-  return buttons;
+  return [
+    // TOP — PLUS just above the grid (inner edge flush to gridTop); MINUS just inside
+    rect(hx, gridTop - btn, 'top', 1),
+    rect(hx, gridTop, 'top', -1),
+    // BOTTOM — PLUS just below the grid; MINUS just inside the bottom edge
+    rect(hx, gridBottom, 'bottom', 1),
+    rect(hx, gridBottom - btn, 'bottom', -1),
+    // LEFT — PLUS just left of the grid; MINUS just inside the left edge
+    rect(gridLeft - btn, vy, 'left', 1),
+    rect(gridLeft, vy, 'left', -1),
+    // RIGHT — PLUS just right of the grid; MINUS just inside the right edge
+    rect(gridRight, vy, 'right', 1),
+    rect(gridRight - btn, vy, 'right', -1),
+  ];
 }
 
 // ---------------------------------------------------------------------------

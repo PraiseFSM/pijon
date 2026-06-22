@@ -98,7 +98,8 @@ The teacher stays in control of their data:
   updates the other.
 - **Editor** — a *tool* for working on the classroom: the **Furniture editor** builds the room (and
   resizes the grid), and the **Students editor** moves students between furniture *and* sets their
-  preferences (roster on the left, preferences on the right). More editors can be added.
+  preferences (roster on the left; the selected student's summary and preferences appear beneath that
+  student in the same left panel). More editors can be added.
 
 **Expected behavior:** move a desk and its student comes along with it; switch from the student tool
 to the furniture tool and your seating is still there.
@@ -112,16 +113,17 @@ to the furniture tool and your seating is still there.
  │  [ Furniture ] [ Students ]                    ← pick a tool       │  editor switcher
  ├─────────────────────────────────────────────────────────────────┤
  │  tool-specific toolbar (changes per editor)                       │  TOP BAR (swaps)
- ├───────────────┬─────────────────────────────────┬───────────────┤
- │ left panel    │                                 │ right panel    │
- │ (roster /     │        the classroom grid       │ (preferences,  │  GRID (shared, never swaps)
- │  palette)     │                                 │  when present) │
- └───────────────┴─────────────────────────────────┴───────────────┘
+ ├───────────────┬─────────────────────────────────────────────────┤
+ │ left panel    │                                                   │
+ │ (roster /     │            the classroom grid                     │  GRID (shared, never swaps)
+ │  palette)     │                                                   │
+ └───────────────┴─────────────────────────────────────────────────┘
 ```
 
-Switching tools swaps the **top bar** and the **side panels**. The **grid stays put**, with all
-furniture and seating intact. Everything autosaves as you go. In the Students editor the roster sits
-on the left and the selected student's preferences on the right.
+Switching tools swaps the **top bar** and the **left side panel**. The **grid stays put**, with all
+furniture and seating intact. Everything autosaves as you go. Pijon uses a **single left panel** — in
+the Students editor the roster sits on the left, and selecting a student reveals their summary and
+preferences **directly beneath that student** in the same panel (there is no separate right panel).
 
 ---
 
@@ -150,29 +152,48 @@ specifies exactly how each template is realized in code.
 
 ## Feature Areas
 
-**Classroom building** — resize the grid (add / delete rows & columns); adjust grid granularity for
-finer furniture placement without changing furniture's real size; place / move / delete furniture;
-furniture palette; (later) rotate, multi-seat tables, custom images.
+**Classroom building** — resize the grid (add / delete rows & columns) via **+ / − buttons** drawn in
+a ghost ring around the grid; place / move / delete furniture; furniture palette; (later) rotate,
+multi-seat tables, custom images. Constraints that keep resizing sane:
+- The **minimum placeable area is 3×3 units** (measured in real units, so the floor scales with
+  granularity); the grid can never be shrunk below it.
+- A **− (remove) button is hidden at any edge where removing would be invalid** — because furniture
+  occupies that edge row/column, or because it would breach the 3×3 minimum. This also prevents a desk
+  from ever sitting "on top of" a − button (the button simply isn't there when removal is illegal).
+- The **+ / − resize buttons keep a constant physical size of one unit (1×1)** regardless of
+  granularity — exactly like furniture keeps its real size when the grid densifies.
+
+**Grid granularity** — finer cell density for more precise furniture placement *without* changing
+furniture's real size. Granularity is restricted to **1, 2, or 4** (powers of two, so every change is
+a clean multiple/divisor and furniture positions always scale to whole cells). Nearness thresholds are
+stored in real units, so proximity/violations/neighbors stay correct across granularity changes.
 
 **Roster** — add students manually (type a name) or import from CSV (the manual add box sits just
 above the Import-CSV control, which is the last item in the roster panel); edit names; add / remove
 students; export. (Later: import from a pasted spreadsheet column.)
 
-**Seating** — auto-suggest an arrangement from a **single action button with a dropdown** (pick the
-algorithm — Greedy / Random — and whether to allocate from scratch or smart-shuffle keeping locks);
-drag students between desks (swap/move); **drag a student straight from the roster onto a desk**; lock
-a student to a desk so suggestions won't move them; show constraint violations (on by default, kept
-live as preferences change); show a desk's neighbors; an **invalid-seating banner** warns when there
-are more students than seats or students left unplaced.
+**Seating** — the Students editor **top bar** holds, in order: **Allocate**, **Clear**, **Undo /
+Redo**, a **weight selector** (−2, −1, +1, +2 — the strength applied to the next preference link),
+**Export** and **Import** (the portable **`.pijon` project file**), and **Settings**. Beyond the
+toolbar: drag students between desks (swap/move); **drag a student straight from the roster onto a
+desk** (same behaviour as dragging between desks — seat them, swapping if occupied); lock a student to
+a desk so suggestions won't move them; show constraint violations (on by default, kept live as
+preferences change); show a desk's neighbors; an **invalid-seating banner** warns when there are more
+students than seats or students left unplaced.
 
 **Settings** (gear button in the Students editor toolbar) — a lightweight popover that houses
-low-frequency controls: the **Nearness** proximity threshold (in real units, stored per classroom so
-allocate, violations, and neighbor preview always agree) and the **Show Violations** toggle (app-level
-UI preference, defaults to on).
+low-frequency controls: the **algorithm choice** (Greedy / Random) and the **allocate-vs-smart-shuffle**
+variant (keep-locks); the **Nearness** proximity threshold (in real units, stored per classroom so
+allocate, violations, and neighbor preview always agree); the **Show Violations** toggle (defaults to
+on); and the **Show Links** toggle for preference lines.
 
-**Preferences** (inside the Students editor, right-hand panel) — set "near / avoid" between students
-and toward room features; a toggle turns on "assigner" mode to create links by clicking two students;
-per-student preference list with weights. All student↔student preferences are mutual.
+**Preferences** (inside the Students editor, single left panel) — set "near / avoid" between students
+and toward room features. Preferences are created **without a dedicated "add preference" form**: turn
+on **assigner mode** and click two students to link them at the currently-selected weight, or use
+drag/seat interactions. The **weight is chosen from four fixed options — −2, −1, +1, +2** (avoid
+strong/weak, prefer weak/strong) in the top-bar selector. Selecting a student shows their **summary and
+their preference list directly beneath them** in the roster panel, each entry removable. All
+student↔student preferences are mutual.
 
 **Look & feel (assets & theming)** — Pijon should be easy to make pretty and easy to re-skin:
 - An **`assets/` folder** holds all images, each with a fixed expected filename, documented in an
@@ -206,11 +227,19 @@ arrangement (and later, print / export to image or PDF).
 Pijon is built by an **agent-led process** steered by short bursts of human feedback. The shape of
 that process is itself a design goal: it must stay legible, testable, and repeatable.
 
-1. **The human gives feedback.** Usually a few sentences — a bug, a feature, a change of direction.
-2. **A conductor agent interprets it.** The conductor uses the **smartest available model at maximum
-   brainpower** to understand the feedback *in context*: the codebase as it actually is, the project
-   goals, and how the request aligns with this outline. This outline is the yardstick — work that
-   drifts from the Design Goals is corrected, not shipped.
+1. **The human gives feedback.** Usually a few sentences — a bug, a feature, a change of direction —
+   often dropped into a **feedback form** (e.g. `feedback.txt`).
+2. **A conductor agent interprets it with maximum brainpower.** The conductor uses the **smartest
+   available model at full effort** to understand the feedback *in context*: the codebase as it
+   actually is, the project goals, and how the request aligns with this outline. For *every* piece of
+   feedback it deliberately considers **how the feedback connects to the Project Outline** and weighs
+   **multiple ways of implementing it** to best achieve the project goals — then it records the
+   **best method** in the TODO (and amends this outline when the feedback changes *what Pijon is*).
+   This outline is the yardstick: work that drifts from the Design Goals is corrected, not shipped.
+   **Feedback-form lifecycle:** a filled-in feedback form is *processed* — translated into outline
+   edits and concrete TODO entries — and **once that translation is complete the form file is
+   deleted**, so an empty/absent form always means "nothing pending." Only delete it after the
+   outline + TODO fully capture the feedback.
 3. **The conductor decomposes the work** into manageable, well-scoped chunks and **spins up
    sub-agents** on a model appropriate to each chunk (cheaper/faster where the task allows) to
    implement them.

@@ -35,11 +35,6 @@ import {
   activeButtonBackground,
   activeButtonBorder,
   activeButtonText,
-  splitButtonCaretDivider,
-  splitButtonDropdownBorder,
-  splitButtonDropdownShadow,
-  splitButtonDropdownBackground,
-  splitButtonSectionLabel,
   btnBackground,
   btnBorder,
   disabledButtonBackground,
@@ -83,8 +78,6 @@ import {
   contextMenuLockText,
   contextMenuUnlockText,
   selectedStudentHeaderBackground,
-  selectedStudentHeaderText,
-  prefPanelAddBorder,
   prefPreferText,
   prefAvoidText,
   dragTargetFill,
@@ -116,7 +109,6 @@ import { SeatGraph } from '../../domain/seatGraph.js';
 import { GreedyAllocator } from '../../domain/allocators/greedy.js';
 import { BogoAllocator } from '../../domain/allocators/bogo.js';
 import type { Allocator } from '../../domain/allocators/types.js';
-import { exportCsv } from '../../domain/io/csv.js';
 import type { Classroom } from '../../domain/classroom.js';
 import { assignments as classroomAssignments } from '../../domain/classroom.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
@@ -275,6 +267,12 @@ let currentWeight = -1.0;
 /** Whether to draw preference links between currently-seated students. */
 let showLinks = false;
 
+/**
+ * §5.B3 — Callback registered by the SidePanel's weight display so the toolbar
+ * weight buttons can push state changes into the React tree for aria-pressed rendering.
+ */
+let setCurrentWeightCallback: ((w: number) => void) | null = null;
+
 // ---------------------------------------------------------------------------
 // §13.6 — Pulse animation loop
 //
@@ -333,7 +331,7 @@ let showContextMenuCallback:
 let closeContextMenuCallback: (() => void) | null = null;
 
 /**
- * Callback registered by the RightPanel to toggle assigner mode from outside
+ * Callback registered by the SidePanel to toggle assigner mode from outside
  * the React component (so the canvas event handlers can read the current value).
  */
 let setAssignerModeCallback: ((on: boolean) => void) | null = null;
@@ -734,171 +732,18 @@ const AssignerHint: React.FC = () => {
 };
 
 // ---------------------------------------------------------------------------
-// §13.2 — SplitButton: primary action + caret dropdown for algorithm/variant
+// §5.B3 — Weight selector: four fixed options in the toolbar
 // ---------------------------------------------------------------------------
 
-/**
- * A split-button combining the action trigger (primary button) with a caret
- * that opens a dropdown to choose the algorithm and variant.
- *
- * - Primary button label reflects the current variant ("Allocate" / "Smart Shuffle").
- * - Dropdown rows are: variant radio + algorithm radio, all in one small panel.
- * - Last choice is remembered in the parent toolbar's useState.
- */
-const SplitButton: React.FC<{
-  algorithmId: string;
-  variant: ActionVariant;
-  onRun: () => void;
-  onChangeAlgorithm: (id: string) => void;
-  onChangeVariant: (v: ActionVariant) => void;
-}> = ({ algorithmId, variant, onRun, onChangeAlgorithm, onChangeVariant }) => {
-  const [dropOpen, setDropOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+/** The four fixed preference weight options. */
+const WEIGHT_OPTIONS: { value: number; label: string }[] = [
+  { value: -2, label: '−2' },
+  { value: -1, label: '−1' },
+  { value: 1, label: '+1' },
+  { value: 2, label: '+2' },
+];
 
-  // Close the dropdown on click outside
-  useEffect(() => {
-    if (!dropOpen) return;
-    const handleOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setDropOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', handleOutside, { capture: true });
-    return () => { window.removeEventListener('mousedown', handleOutside, { capture: true }); };
-  }, [dropOpen]);
-
-  const primaryLabel = variant === 'allocate' ? 'Allocate' : 'Smart Shuffle';
-  const primaryTitle =
-    variant === 'allocate'
-      ? 'Assign all students to desks from scratch'
-      : 'Re-seat respecting preferences (locked seats stay)';
-
-  const primaryStyle: React.CSSProperties = {
-    padding: '4px 10px',
-    borderRadius: '4px 0 0 4px',
-    border: `1px solid ${primaryButtonBorder}`,
-    borderRight: 'none',
-    background: primaryButtonBackground,
-    color: primaryButtonText,
-    cursor: 'pointer',
-    fontSize: '0.82rem',
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-  };
-
-  const caretStyle: React.CSSProperties = {
-    padding: '4px 7px',
-    borderRadius: '0 4px 4px 0',
-    border: `1px solid ${primaryButtonBorder}`,
-    borderLeft: `1px solid ${splitButtonCaretDivider}`,
-    background: primaryButtonBackground,
-    color: primaryButtonText,
-    cursor: 'pointer',
-    fontSize: '0.75rem',
-    lineHeight: 1,
-  };
-
-  const dropStyle: React.CSSProperties = {
-    position: 'absolute',
-    top: 'calc(100% + 4px)',
-    left: 0,
-    zIndex: 200,
-    background: splitButtonDropdownBackground,
-    border: `1px solid ${splitButtonDropdownBorder}`,
-    borderRadius: 6,
-    boxShadow: `0 4px 12px ${splitButtonDropdownShadow}`,
-    minWidth: 200,
-    padding: '8px 0',
-    fontSize: '0.82rem',
-  };
-
-  const sectionTitle: React.CSSProperties = {
-    padding: '2px 12px 4px',
-    fontSize: '0.68rem',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    color: splitButtonSectionLabel,
-  };
-
-  const radioRow: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '4px 12px',
-    cursor: 'pointer',
-    userSelect: 'none',
-  };
-
-  return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex' }}>
-      {/* Primary action button */}
-      <button
-        type="button"
-        style={primaryStyle}
-        onClick={onRun}
-        title={primaryTitle}
-        data-testid="split-btn-primary"
-      >
-        {primaryLabel}
-      </button>
-
-      {/* Caret toggle */}
-      <button
-        type="button"
-        style={caretStyle}
-        onClick={() => { setDropOpen((o) => !o); }}
-        title="Choose algorithm and action"
-        aria-haspopup="listbox"
-        aria-expanded={dropOpen}
-        data-testid="split-btn-caret"
-      >
-        ▾
-      </button>
-
-      {/* Dropdown panel */}
-      {dropOpen && (
-        <div style={dropStyle} role="listbox" data-testid="split-btn-dropdown">
-          {/* --- Variant section --- */}
-          <div style={sectionTitle}>Action</div>
-          {(['allocate', 'smart_shuffle'] as const).map((v) => (
-            <label key={v} style={{ ...radioRow, fontWeight: v === variant ? 600 : 400 }}>
-              <input
-                type="radio"
-                name="split-variant"
-                value={v}
-                checked={variant === v}
-                onChange={() => { onChangeVariant(v); }}
-                data-testid={`split-variant-${v}`}
-              />
-              {v === 'allocate' ? 'Allocate (from scratch)' : 'Smart Shuffle (keep locks)'}
-            </label>
-          ))}
-
-          <div style={{ borderTop: '1px solid #eee', margin: '6px 0' }} />
-
-          {/* --- Algorithm section --- */}
-          <div style={sectionTitle}>Algorithm</div>
-          {ALLOCATOR_REGISTRY.map((entry) => (
-            <label key={entry.id} style={{ ...radioRow, fontWeight: entry.id === algorithmId ? 600 : 400 }}>
-              <input
-                type="radio"
-                name="split-algorithm"
-                value={entry.id}
-                checked={algorithmId === entry.id}
-                onChange={() => {
-                  onChangeAlgorithm(entry.id);
-                }}
-                data-testid={`split-algorithm-${entry.id}`}
-              />
-              {entry.label}
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+// (SplitButton removed in §5.B4 — algorithm + variant moved to SettingsMenu; toolbar shows single Allocate button)
 
 // ---------------------------------------------------------------------------
 // §13.8 — SeatingIssuesBanner
@@ -991,31 +836,42 @@ const SeatingIssuesBanner: React.FC = () => {
 };
 
 // ---------------------------------------------------------------------------
-// StudentToolbar — wires SplitButton + undo/redo + file ops + settings
+// StudentToolbar — §5.B4 order: Allocate · Clear · Undo/Redo · weights · Export · Import · Settings
 // ---------------------------------------------------------------------------
 
 const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
-  // §13.2: split-button state — algorithm id + variant, both remembered.
+  // §5.B4: algorithm id + variant owned by the toolbar, passed into SettingsMenu.
   // Default: Greedy algorithm, Allocate variant.
-  // ALLOCATOR_REGISTRY always has at least one entry (greedy) — non-null assertion is safe.
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const [algorithmId, setAlgorithmId] = useState<string>(ALLOCATOR_REGISTRY[0]!.id);
   const [variant, setVariant] = useState<ActionVariant>('allocate');
 
+  // §5.B4: showLinks owned by toolbar, passed into SettingsMenu + drives canvas via module var.
+  const [showLinksState, setShowLinksState] = useState(false);
+
+  // §5.B3: track active weight in local state so aria-pressed re-renders correctly.
+  const [activeWeight, setActiveWeight] = useState(currentWeight);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsAnchorRef = useRef<HTMLDivElement>(null);
+
+  // Keep module-level showLinks in sync with toolbar state
+  useEffect(() => {
+    showLinks = showLinksState;
+    ctx.canvas.requestRepaint();
+  }, [showLinksState, ctx.canvas]);
 
   const canUndo = ctx.store.historyPtr > 0;
   const canRedo = ctx.store.historyPtr < ctx.store.history.length - 1;
 
   /** Build the Allocator instance from the currently-selected algorithm. */
   const makeAllocator = useCallback((): Allocator => {
-    // Fall back to the first entry (greedy) — registry always has at least one.
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const entry = ALLOCATOR_REGISTRY.find((e) => e.id === algorithmId) ?? ALLOCATOR_REGISTRY[0]!;
     return entry.factory();
   }, [algorithmId]);
 
+  // §5.B4 — single Allocate button (variant + algorithm chosen via Settings)
   const handleRun = useCallback(() => {
     const allocator = makeAllocator();
     if (variant === 'allocate') {
@@ -1050,26 +906,8 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     ctx.canvas.requestRepaint();
   };
 
-  const handleExportCsv = () => {
-    const roster = ctx.store.roster;
-    if (roster.length === 0) {
-      alert('No students to export.');
-      return;
-    }
-    const csv = exportCsv(roster);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'roster.csv';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => { URL.revokeObjectURL(url); }, 500);
-  };
-
-  const handleSave = () => {
+  // §5.B4 — Export .pijon project file
+  const handleExportPijon = () => {
     if (ctx.persistence === null) {
       console.warn('[StudentEditor] Persistence not yet available.');
       return;
@@ -1077,7 +915,8 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     void ctx.persistence.saveToFile();
   };
 
-  const handleLoad = () => {
+  // §5.B4 — Import .pijon project file
+  const handleImportPijon = () => {
     if (ctx.persistence === null) {
       console.warn('[StudentEditor] Persistence not yet available.');
       return;
@@ -1089,9 +928,12 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     setSettingsOpen(false);
   }, []);
 
+  const handleToggleShowLinks = useCallback(() => {
+    setShowLinksState((prev) => !prev);
+  }, []);
+
   const btn: React.CSSProperties = {
     padding: '4px 10px',
-    marginRight: 4,
     borderRadius: 4,
     border: `1px solid ${btnBorder}`,
     background: btnBackground,
@@ -1101,6 +943,18 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   };
 
   const btnDisabled: React.CSSProperties = { ...btn, opacity: 0.45, cursor: 'default' };
+
+  const allocateBtn: React.CSSProperties = {
+    padding: '4px 12px',
+    borderRadius: 4,
+    border: `1px solid ${primaryButtonBorder}`,
+    background: primaryButtonBackground,
+    color: primaryButtonText,
+    cursor: 'pointer',
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+  };
 
   return (
     <>
@@ -1119,22 +973,24 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           Students
         </span>
 
-        {/* §13.2 — Single split-button replaces separate Allocate/SmartShuffle/<select> */}
-        <SplitButton
-          algorithmId={algorithmId}
-          variant={variant}
-          onRun={handleRun}
-          onChangeAlgorithm={setAlgorithmId}
-          onChangeVariant={setVariant}
-        />
+        {/* §5.B4 — Single Allocate button (replaces SplitButton) */}
+        <button
+          type="button"
+          style={allocateBtn}
+          onClick={handleRun}
+          data-testid="allocate-btn"
+          title={variant === 'allocate' ? 'Assign all students to desks from scratch' : 'Re-seat respecting preferences (locked seats stay)'}
+        >
+          Allocate
+        </button>
 
-        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
 
         <button style={btn} type="button" onClick={handleClear}>
           Clear
         </button>
 
-        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
 
         <button
           style={canUndo ? btn : btnDisabled}
@@ -1155,32 +1011,85 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           Redo ↪
         </button>
 
-        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
 
-        <button style={btn} type="button" onClick={handleExportCsv} title="Download roster as CSV">
-          Export CSV
+        {/* §5.B3 — Weight selector: four fixed options, aria-pressed for active */}
+        {WEIGHT_OPTIONS.map(({ value, label }) => {
+          const isActive = activeWeight === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              data-testid={`weight-btn-${value.toString()}`}
+              aria-pressed={isActive}
+              title={`Set preference weight to ${value > 0 ? '+' : ''}${value.toString()}`}
+              onClick={() => {
+                currentWeight = value;
+                setActiveWeight(value);
+                // Also push into SidePanel for its weight display
+                if (setCurrentWeightCallback !== null) {
+                  setCurrentWeightCallback(value);
+                }
+              }}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 4,
+                border: `1px solid ${isActive ? activeButtonBorder : btnBorder}`,
+                background: isActive ? activeButtonBackground : btnBackground,
+                color: isActive ? activeButtonText : textDark,
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: isActive ? 700 : 400,
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
+
+        {/* §5.B4 — Export .pijon project file */}
+        <button
+          style={btn}
+          type="button"
+          onClick={handleExportPijon}
+          data-testid="toolbar-export-pijon"
+          title="Export project as .pijon file"
+        >
+          Export
         </button>
 
-        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
-
-        <button style={btn} type="button" onClick={handleSave} title="Save classroom to a .pijon file">
-          Save Arr…
+        {/* §5.B4 — Import .pijon project file */}
+        <button
+          style={btn}
+          type="button"
+          onClick={handleImportPijon}
+          data-testid="toolbar-import-pijon"
+          title="Import project from .pijon file"
+        >
+          Import
         </button>
-        <button style={btn} type="button" onClick={handleLoad} title="Open a .pijon file">
-          Load Arr…
-        </button>
 
-        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
+        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
 
         {/* §13.6 — Assigner hint banner (appears when first student is selected) */}
         <AssignerHint />
 
-        <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 4px' }} />
-
-        {/* §13.3 Settings gear button + popover (houses §13.4 Nearness + §13.5 Violations) */}
-        <div ref={settingsAnchorRef} style={{ position: 'relative' }}>
+        {/* §13.3 Settings gear button + popover (§13.4 Nearness, §13.5 Violations, §5.B4 Algorithm/Variant/ShowLinks) */}
+        <div ref={settingsAnchorRef} style={{ position: 'relative', marginLeft: 'auto' }}>
           <GearButton open={settingsOpen} onClick={() => { setSettingsOpen((prev) => !prev); }} />
-          <SettingsMenu ctx={ctx} open={settingsOpen} onClose={handleCloseSettings} />
+          <SettingsMenu
+            ctx={ctx}
+            open={settingsOpen}
+            onClose={handleCloseSettings}
+            algorithmId={algorithmId}
+            onChangeAlgorithm={setAlgorithmId}
+            variant={variant}
+            onChangeVariant={setVariant}
+            showLinks={showLinksState}
+            onToggleShowLinks={handleToggleShowLinks}
+          />
         </div>
       </div>
 
@@ -1195,13 +1104,15 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 // ---------------------------------------------------------------------------
 
 /**
- * Pure roster panel — renders the student list, manual add, and CSV import.
+ * §5.B1 — Roster panel with inline preference detail + assigner toggle.
  * Order (top to bottom):
  *   1. Header
  *   2. Student count badge
  *   3. Manual add-student form
- *   4. Scrollable student list (click=select, ×=remove)
+ *   4. Scrollable student list: each student row, and when selected: assigner toggle + pref list
  *   5. Import CSV (bottom-most control)
+ *
+ * Also owns: assigner mode state, currentWeight sync (via setCurrentWeightCallback).
  */
 const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const roster = ctx.store.roster;
@@ -1211,8 +1122,45 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const [importStatus, setImportStatus] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // §5.B1 — Assigner mode state lives here (moved from RightPanel)
+  const [assignerOn, setAssignerOn] = useState(false);
+
+  // §5.B3 — weight display state: tracks currentWeight for aria-pressed rendering
+  const [displayWeight, setDisplayWeight] = useState(currentWeight);
+
+  // Keep module-level assignerModeActive in sync
+  useEffect(() => {
+    assignerModeActive = assignerOn;
+    if (!assignerOn) {
+      markerFirstFid = null;
+      markerFirstStudent = null;
+      stopPulseLoop();
+      if (setAssignerFirstStudentCallback !== null) {
+        setAssignerFirstStudentCallback(null);
+      }
+    }
+    ctx.canvas.requestRepaint();
+  }, [assignerOn, ctx.canvas]);
+
+  // Register setAssignerModeCallback so deactivate() can reset assigner mode
+  useEffect(() => {
+    setAssignerModeCallback = setAssignerOn;
+    return () => {
+      setAssignerModeCallback = null;
+    };
+  }, []);
+
+  // §5.B3 — Register setCurrentWeightCallback so toolbar weight buttons update this component
+  useEffect(() => {
+    setCurrentWeightCallback = setDisplayWeight;
+    return () => {
+      setCurrentWeightCallback = null;
+    };
+  }, []);
+
   const realStudents = roster.filter((s) => !s.isFixture);
   const fixtures = roster.filter((s) => s.isFixture);
+  const nameMap = new Map<StudentId, string>(roster.map((s) => [s.id, s.name]));
 
   const handleAddStudent = useCallback(() => {
     const trimmed = addName.trim();
@@ -1242,6 +1190,22 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       ctx.store.removeStudent(id);
     },
     [ctx.store],
+  );
+
+  // §5.B1 — Pref removal (moves from RightPanel)
+  const handleRemovePref = useCallback(
+    (pref: Preference) => {
+      if (selectedStudentId === null) return;
+      if (pref.kind === 'location') return;
+      if (pref.kind === 'furniture') {
+        ctx.store.removePreference(selectedStudentId, pref.targetId);
+        ctx.canvas.requestRepaint();
+        return;
+      }
+      ctx.store.clearMutualPreference(selectedStudentId, pref.targetId);
+      ctx.canvas.requestRepaint();
+    },
+    [selectedStudentId, ctx.store, ctx.canvas],
   );
 
   const handleImportClick = useCallback(() => {
@@ -1333,74 +1297,188 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         {realStudents.map((s) => {
           const isSelected = s.id === selectedStudentId;
           return (
-            <div
-              key={s.id}
-              role="button"
-              tabIndex={0}
-              draggable
-              onDragStart={(e) => {
-                // §13.7 — set studentId payload + stash for Firefox/Safari fallback
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData(DRAG_STUDENT_ID_KEY, s.id);
-                e.dataTransfer.setData('text/plain', s.id);
-                stashDraggedStudentId(s.id);
-                // Suppress default ghost image so only our canvas overlay is visible
-                e.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
-              }}
-              onDragEnd={() => {
-                // Clear stash regardless of whether drop was accepted
-                clearDraggedStudentIdStash();
-              }}
-              style={{
-                ...itemStyle,
-                background: isSelected ? rosterSelectedBackground : undefined,
-                borderLeft: isSelected ? `3px solid ${rosterSelectedBorder}` : '3px solid transparent',
-                cursor: 'grab',
-              }}
-              onClick={() => { handleStudentClick(s.id); }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') handleStudentClick(s.id);
-              }}
-            >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                {s.name}
-              </span>
-              {s.preferences.length > 0 && (
-                <span
+            <div key={s.id}>
+              {/* Student row */}
+              <div
+                role="button"
+                tabIndex={0}
+                draggable
+                onDragStart={(e) => {
+                  // §13.7 — set studentId payload + stash for Firefox/Safari fallback
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData(DRAG_STUDENT_ID_KEY, s.id);
+                  e.dataTransfer.setData('text/plain', s.id);
+                  stashDraggedStudentId(s.id);
+                  // Suppress default ghost image so only our canvas overlay is visible
+                  e.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
+                }}
+                onDragEnd={() => {
+                  // Clear stash regardless of whether drop was accepted
+                  clearDraggedStudentIdStash();
+                }}
+                style={{
+                  ...itemStyle,
+                  background: isSelected ? rosterSelectedBackground : undefined,
+                  borderLeft: isSelected ? `3px solid ${rosterSelectedBorder}` : '3px solid transparent',
+                  cursor: 'grab',
+                }}
+                onClick={() => { handleStudentClick(s.id); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') handleStudentClick(s.id);
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                  {s.name}
+                </span>
+                {s.preferences.length > 0 && (
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      marginLeft: 4,
+                      fontSize: '0.68rem',
+                      color: prefCountBadgeText,
+                      background: prefCountBadgeBackground,
+                      borderRadius: 3,
+                      padding: '1px 4px',
+                    }}
+                    title={`${s.preferences.length.toString()} preference(s)`}
+                  >
+                    {s.preferences.length}p
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => { handleRemoveStudent(s.id, e); }}
                   style={{
                     flexShrink: 0,
                     marginLeft: 4,
+                    padding: '1px 5px',
                     fontSize: '0.68rem',
-                    color: prefCountBadgeText,
-                    background: prefCountBadgeBackground,
+                    border: `1px solid ${dangerButtonBorder}`,
                     borderRadius: 3,
-                    padding: '1px 4px',
+                    background: dangerButtonBackground,
+                    color: dangerButtonText,
+                    cursor: 'pointer',
+                    lineHeight: 1,
                   }}
-                  title={`${s.preferences.length.toString()} preference(s)`}
+                  title={`Remove ${s.name}`}
+                  aria-label={`Remove ${s.name}`}
                 >
-                  {s.preferences.length}p
-                </span>
+                  ×
+                </button>
+              </div>
+
+              {/* §5.B1 — Inline preference detail + assigner toggle (shown when student is selected) */}
+              {isSelected && (
+                <div
+                  data-testid="student-pref-detail"
+                  style={{
+                    background: selectedStudentHeaderBackground,
+                    borderLeft: `3px solid ${rosterSelectedBorder}`,
+                    borderBottom: `1px solid ${dividerLight}`,
+                    padding: '6px 8px',
+                  }}
+                >
+                  {/* Assigner mode toggle */}
+                  <button
+                    type="button"
+                    onClick={() => { setAssignerOn((prev) => !prev); }}
+                    style={{
+                      width: '100%',
+                      padding: '3px 8px',
+                      marginBottom: 4,
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderStyle: 'solid',
+                      borderColor: assignerOn ? assignerHintBackground : btnBorder,
+                      background: assignerOn ? assignerHintBackground : btnBackground,
+                      color: assignerOn ? assignerHintText : textDark,
+                      cursor: 'pointer',
+                      fontSize: '0.76rem',
+                      fontWeight: 600,
+                      textAlign: 'left',
+                    }}
+                    title={assignerOn ? 'Assigner mode ON — click two students on the canvas to link them. ESC to cancel.' : 'Enable assigner mode to link students by clicking them on the canvas'}
+                  >
+                    {assignerOn ? '🖱 Assigner ON' : 'Enable Assigner'}
+                  </button>
+
+                  {/* Preference list header */}
+                  <div style={{ fontSize: '0.7rem', color: textMuted, fontWeight: 700, marginBottom: 2 }}>
+                    {s.name} — preferences
+                  </div>
+
+                  {s.preferences.length === 0 ? (
+                    <div style={{ fontSize: '0.7rem', color: textDisabled, fontStyle: 'italic' }}>
+                      None. Use Assigner or drag between desks.
+                    </div>
+                  ) : (
+                    s.preferences.map((pref, idx) => {
+                      let targetLabel: string;
+                      if (pref.kind === 'student') {
+                        targetLabel = nameMap.get(pref.targetId) ?? pref.targetId;
+                      } else if (pref.kind === 'furniture') {
+                        targetLabel = `Desk: ${pref.targetId}`;
+                      } else {
+                        targetLabel = `Location: ${pref.target}`;
+                      }
+                      const dirLabel = pref.weight > 0 ? '↑ Prefer' : '↓ Avoid';
+                      const dirColor = pref.weight > 0 ? prefPreferText : prefAvoidText;
+                      return (
+                        <div
+                          // eslint-disable-next-line react/no-array-index-key
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '0.72rem',
+                            padding: '2px 0',
+                            borderBottom: `1px solid ${prefCountBadgeBackground}`,
+                          }}
+                        >
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <span style={{ color: dirColor, fontWeight: 700 }}>{dirLabel}</span>
+                            {' '}
+                            {targetLabel}
+                            <span style={{ color: textDisabled, marginLeft: 3 }}>
+                              ({pref.weight > 0 ? '+' : ''}{pref.weight.toFixed(1)})
+                            </span>
+                          </span>
+                          {pref.kind !== 'location' && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleRemovePref(pref); }}
+                              style={{
+                                flexShrink: 0,
+                                marginLeft: 4,
+                                padding: '1px 4px',
+                                fontSize: '0.65rem',
+                                border: `1px solid ${dangerButtonBorder}`,
+                                borderRadius: 3,
+                                background: dangerButtonBackground,
+                                color: dangerButtonText,
+                                cursor: 'pointer',
+                              }}
+                              title="Remove this preference"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* Current weight display */}
+                  <div style={{ marginTop: 4, fontSize: '0.7rem', color: textMuted }}>
+                    Weight: <span style={{ fontWeight: 700 }}>{displayWeight > 0 ? '+' : ''}{displayWeight.toFixed(1)}</span>
+                    <span style={{ marginLeft: 4, color: displayWeight < 0 ? prefAvoidText : prefPreferText }}>
+                      ({displayWeight < 0 ? 'Avoid' : 'Prefer'})
+                    </span>
+                  </div>
+                </div>
               )}
-              <button
-                type="button"
-                onClick={(e) => { handleRemoveStudent(s.id, e); }}
-                style={{
-                  flexShrink: 0,
-                  marginLeft: 4,
-                  padding: '1px 5px',
-                  fontSize: '0.68rem',
-                  border: `1px solid ${dangerButtonBorder}`,
-                  borderRadius: 3,
-                  background: dangerButtonBackground,
-                  color: dangerButtonText,
-                  cursor: 'pointer',
-                  lineHeight: 1,
-                }}
-                title={`Remove ${s.name}`}
-                aria-label={`Remove ${s.name}`}
-              >
-                ×
-              </button>
             </div>
           );
         })}
@@ -1700,411 +1778,9 @@ const StudentSidePanelWithMenu: React.FC<{ ctx: EditorContext }> = ({ ctx }) => 
   );
 };
 
-// ---------------------------------------------------------------------------
-// RightPanel — preferences panel for the selected student
-// ---------------------------------------------------------------------------
+// (AddPrefForm removed in §5.B2 — prefs created only via assigner mode + drag)
 
-/**
- * Add-preference form — extracted so we can use a React `key` to reset its
- * internal state when the selected student changes (avoids setState-in-effect).
- */
-const AddPrefForm: React.FC<{
-  selectedStudent: Student;
-  realStudents: readonly Student[];
-  weight: number;
-  onAdd: (targetId: StudentId, weight: number) => void;
-}> = ({ selectedStudent, realStudents, weight, onAdd }) => {
-  const [addTargetId, setAddTargetId] = useState<StudentId | ''>('');
-
-  const handleAddPrefInner = () => {
-    if (addTargetId === '') return;
-    if (addTargetId === selectedStudent.id) return;
-    const targetId: StudentId = addTargetId;
-    onAdd(targetId, weight);
-    setAddTargetId('');
-  };
-
-  return (
-    <div
-      style={{
-        padding: '8px 10px',
-        borderTop: `1px solid ${prefPanelAddBorder}`,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 5,
-      }}
-    >
-      <div style={{ fontSize: '0.72rem', color: textMedium, fontWeight: 600 }}>
-        Add preference:
-      </div>
-      <select
-        value={addTargetId}
-        onChange={(e) => { setAddTargetId(e.target.value as StudentId | ''); }}
-        style={{
-          fontSize: '0.74rem',
-          padding: '2px 4px',
-          borderRadius: 3,
-          border: `1px solid ${btnBorder}`,
-        }}
-      >
-        <option value="">— target student —</option>
-        {realStudents
-          .filter((st) => st.id !== selectedStudent.id)
-          .map((st) => (
-            <option key={st.id} value={st.id}>
-              {st.name}
-            </option>
-          ))}
-      </select>
-      <button
-        type="button"
-        onClick={handleAddPrefInner}
-        disabled={addTargetId === ''}
-        style={{
-          padding: '3px 8px',
-          borderRadius: 3,
-          border: `1px solid ${addStudentButtonBorder}`,
-          background: addTargetId === '' ? disabledButtonBackground : addStudentButtonBackground,
-          color: addStudentButtonText,
-          cursor: addTargetId === '' ? 'default' : 'pointer',
-          fontSize: '0.74rem',
-          fontWeight: 600,
-        }}
-      >
-        Add
-      </button>
-    </div>
-  );
-};
-
-const StudentPreferencesPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
-  const roster = ctx.store.roster;
-  const selectedStudentId = ctx.store.selectedStudentId;
-
-  const [assignerOn, setAssignerOn] = useState(false);
-  const [showLinksOn, setShowLinksOn] = useState(false);
-  const [weight, setWeight] = useState(-1.0);
-
-  // Keep module-level vars in sync with React state
-  React.useEffect(() => {
-    assignerModeActive = assignerOn;
-    // Reset marker state when turning assigner mode off
-    if (!assignerOn) {
-      markerFirstFid = null;
-      markerFirstStudent = null;
-      // §13.6: stop the pulse loop and clear the toolbar hint
-      stopPulseLoop();
-      if (setAssignerFirstStudentCallback !== null) {
-        setAssignerFirstStudentCallback(null);
-      }
-    }
-    ctx.canvas.requestRepaint();
-  }, [assignerOn, ctx.canvas]);
-
-  React.useEffect(() => {
-    showLinks = showLinksOn;
-    ctx.canvas.requestRepaint();
-  }, [showLinksOn, ctx.canvas]);
-
-  React.useEffect(() => {
-    currentWeight = weight;
-  }, [weight]);
-
-  // Register the assigner-mode toggle callback so canvas events can read it
-  React.useEffect(() => {
-    setAssignerModeCallback = setAssignerOn;
-    return () => {
-      setAssignerModeCallback = null;
-    };
-  }, []);
-
-  const realStudents = roster.filter((s) => !s.isFixture);
-  const nameMap = new Map<StudentId, string>(roster.map((s) => [s.id, s.name]));
-
-  const selectedStudent =
-    selectedStudentId !== null ? roster.find((s) => s.id === selectedStudentId) ?? null : null;
-
-  const handleToggleAssigner = () => {
-    setAssignerOn((prev) => !prev);
-  };
-
-  const handleToggleLinks = () => {
-    setShowLinksOn((prev) => !prev);
-  };
-
-  const handleWeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = parseFloat(e.target.value);
-    if (Number.isFinite(v)) {
-      setWeight(v);
-      currentWeight = v;
-    }
-  };
-
-  const handleRemovePref = (pref: Preference) => {
-    if (selectedStudentId === null) return;
-    if (pref.kind === 'location') return;
-    if (pref.kind === 'furniture') {
-      ctx.store.removePreference(selectedStudentId, pref.targetId);
-      ctx.canvas.requestRepaint();
-      return;
-    }
-    // student-kind: enforce mutual removal
-    ctx.store.clearMutualPreference(selectedStudentId, pref.targetId);
-    ctx.canvas.requestRepaint();
-  };
-
-  const handleAddPref = (targetId: StudentId, w: number) => {
-    if (selectedStudentId === null) return;
-    ctx.store.setMutualPreference(selectedStudentId, targetId, w);
-    ctx.canvas.requestRepaint();
-  };
-
-  const btn: React.CSSProperties = {
-    padding: '4px 10px',
-    borderRadius: 4,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: btnBorder,
-    background: btnBackground,
-    cursor: 'pointer',
-    fontSize: '0.8rem',
-    whiteSpace: 'nowrap',
-  };
-  const btnToggled: React.CSSProperties = {
-    ...btn,
-    background: activeButtonBackground,
-    color: activeButtonText,
-    borderColor: activeButtonBorder,
-  };
-  const btnOrange: React.CSSProperties = {
-    ...btn,
-    background: assignerHintBackground,
-    color: assignerHintText,
-    borderColor: assignerHintBackground,
-  };
-
-  const prefRowStyle: React.CSSProperties = {
-    padding: '3px 8px',
-    borderBottom: `1px solid ${prefCountBadgeBackground}`,
-    fontSize: '0.75rem',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  };
-
-  return (
-    <div
-      style={{
-        width: 220,
-        minWidth: 190,
-        display: 'flex',
-        flexDirection: 'column',
-        background: sidePanelBackground,
-        borderLeft: `1px solid ${panelBorder}`,
-        overflowY: 'hidden',
-        height: '100%',
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          padding: '8px 10px 4px',
-          fontWeight: 700,
-          fontSize: '0.78rem',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          color: sidePanelHeaderText,
-          borderBottom: `1px solid ${panelBorder}`,
-        }}
-      >
-        Preferences
-      </div>
-
-      {/* Assigner mode toggle — top of panel */}
-      <div
-        style={{
-          padding: '8px 10px',
-          borderBottom: `1px solid ${dividerLight}`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6,
-        }}
-      >
-        <button
-          type="button"
-          onClick={handleToggleAssigner}
-          style={assignerOn ? btnOrange : btn}
-          title={
-            assignerOn
-              ? 'Assigner mode ON — click two students to link them. ESC to cancel.'
-              : 'Enable assigner mode to link students by clicking them on the canvas'
-          }
-        >
-          {assignerOn ? '🖱 Assigner ON' : 'Enable Assigner'}
-        </button>
-
-        {assignerOn && (
-          <div style={{ fontSize: '0.72rem', color: textMuted, fontStyle: 'italic', lineHeight: 1.4 }}>
-            Click a student, then another to link. ESC to cancel.
-          </div>
-        )}
-
-        {/* Weight control (shown in assigner mode for context; always useful) */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.78rem' }}>
-          <span style={{ color: textMedium }}>Weight:</span>
-          <input
-            type="number"
-            step="0.5"
-            value={weight}
-            onChange={handleWeightChange}
-            style={{
-              width: 62,
-              padding: '2px 4px',
-              borderRadius: 3,
-              border: `1px solid ${btnBorder}`,
-              fontSize: '0.78rem',
-            }}
-            title="Negative = avoid, positive = prefer"
-          />
-          <span
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 600,
-              color: weight < 0 ? prefAvoidText : prefPreferText,
-            }}
-          >
-            {weight < 0 ? 'Avoid' : weight > 0 ? 'Prefer' : 'Neutral'}
-          </span>
-        </label>
-
-        {/* Show links toggle */}
-        <button
-          type="button"
-          onClick={handleToggleLinks}
-          style={showLinksOn ? btnToggled : btn}
-          title="Draw preference links between currently seated students"
-        >
-          {showLinksOn ? 'Links ON' : 'Show Links'}
-        </button>
-      </div>
-
-      {/* Selected student preference detail */}
-      {selectedStudent === null ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-            fontSize: '0.78rem',
-            color: textDisabled,
-            textAlign: 'center',
-            lineHeight: 1.5,
-          }}
-        >
-          Click a student in the roster to see their preferences.
-        </div>
-      ) : (
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          {/* Selected student header */}
-          <div
-            style={{
-              padding: '6px 10px',
-              fontWeight: 700,
-              fontSize: '0.82rem',
-              color: selectedStudentHeaderText,
-              borderBottom: `1px solid ${dividerLight}`,
-              background: selectedStudentHeaderBackground,
-            }}
-          >
-            {selectedStudent.name}
-          </div>
-
-          {/* Preference list */}
-          {selectedStudent.preferences.length === 0 ? (
-            <div style={{ padding: '8px 10px', fontSize: '0.74rem', color: textDisabled }}>
-              No preferences set.
-            </div>
-          ) : (
-            selectedStudent.preferences.map((pref, idx) => {
-              let targetLabel: string;
-              if (pref.kind === 'student') {
-                targetLabel = nameMap.get(pref.targetId) ?? pref.targetId;
-              } else if (pref.kind === 'furniture') {
-                targetLabel = `Furniture: ${pref.targetId}`;
-              } else {
-                targetLabel = `Location: ${pref.target}`;
-              }
-              const dirLabel = pref.weight > 0 ? '↑ Prefer' : '↓ Avoid';
-              const dirColor = pref.weight > 0 ? prefPreferText : prefAvoidText;
-              return (
-                <div
-                  // eslint-disable-next-line react/no-array-index-key
-                  key={idx}
-                  style={prefRowStyle}
-                >
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: dirColor, fontWeight: 700 }}>{dirLabel}</span>
-                    {' '}
-                    {targetLabel}
-                    <span style={{ color: textDisabled, marginLeft: 3 }}>
-                      ({pref.weight > 0 ? '+' : ''}{pref.weight.toFixed(1)})
-                    </span>
-                  </span>
-                  {pref.kind !== 'location' && (
-                    <button
-                      type="button"
-                      onClick={() => { handleRemovePref(pref); }}
-                      style={{
-                        flexShrink: 0,
-                        marginLeft: 4,
-                        padding: '1px 5px',
-                        fontSize: '0.68rem',
-                        border: `1px solid ${dangerButtonBorder}`,
-                        borderRadius: 3,
-                        background: dangerButtonBackground,
-                        color: dangerButtonText,
-                        cursor: 'pointer',
-                      }}
-                      title="Remove this preference"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              );
-            })
-          )}
-
-          {/* Add preference form — keyed on selectedStudentId so React resets
-               its internal dropdown state whenever the selection changes,
-               avoiding the need for a setState-in-effect reset. */}
-          <AddPrefForm
-            key={selectedStudentId ?? ''}
-            selectedStudent={selectedStudent}
-            realStudents={realStudents}
-            weight={weight}
-            onAdd={handleAddPref}
-          />
-        </div>
-      )}
-
-      {/* Usage hint */}
-      <div
-        style={{
-          padding: '6px 8px',
-          fontSize: '0.68rem',
-          color: textDisabled,
-          lineHeight: 1.4,
-          borderTop: `1px solid ${dividerLight}`,
-        }}
-      >
-        Select a student, then use Assigner or the Add form.
-      </div>
-    </div>
-  );
-};
+// (StudentPreferencesPanel removed in §5.B1 — preferences now shown inline in the SidePanel)
 
 // ---------------------------------------------------------------------------
 // Pointer / canvas helpers
@@ -2151,7 +1827,7 @@ export const StudentEditor: EditorMode = {
 
   Toolbar: StudentToolbar,
   SidePanel: StudentSidePanelWithMenu,
-  RightPanel: StudentPreferencesPanel,
+  // RightPanel removed in §5.B1 — preferences now shown inline in the SidePanel
 
   // ---- Lifecycle -----------------------------------------------------------
 
@@ -2166,11 +1842,12 @@ export const StudentEditor: EditorMode = {
     // §13.7 — clear roster-drag hover state on activate
     rosterDragHoverFid = null;
     clearDraggedStudentIdStash();
-    // Reset mode flags so they match the RightPanel's fresh React state on re-mount.
+    // Reset mode flags so they match the SidePanel's fresh React state on re-mount.
     // (deactivate also resets these, but activate is the definitive guard against
     // any edge-case where deactivate didn't run cleanly before a re-activate.)
     assignerModeActive = false;
     showLinks = false;
+    currentWeight = -1.0;
     // Wire the pulse repaint fn from the incoming context.
     pulseRepaintFn = () => { ctx.canvas.requestRepaint(); };
     clearGraphCache();
@@ -2192,9 +1869,9 @@ export const StudentEditor: EditorMode = {
     // §13.6: stop the pulse loop on deactivate — no leak to next editor
     stopPulseLoop();
     pulseRepaintFn = null;
-    // Reset showLinks so it matches the RightPanel's fresh useState(false) on re-mount.
+    // Reset showLinks so it matches the toolbar's fresh useState(false) on re-mount.
     // Without this, toggling showLinks ON then switching editors and back would leave
-    // the overlay rendering but the toggle button showing the wrong state.
+    // the overlay rendering but the toolbar button showing the wrong state.
     showLinks = false;
     // Notify the React component to reset its toggle state
     if (setAssignerModeCallback !== null) {
