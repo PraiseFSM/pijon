@@ -5,14 +5,10 @@ from typing import Dict, List, Optional
 
 from src.models.student import Student
 from src.models.preference import Preference, PreferenceTargetType
+from src.utils import fixture_id, enforce_bidirectional
 
 
 FULL_FORMAT_HEADER = ['name', 'fixture', 'pref_target', 'pref_type', 'pref_weight']
-
-
-def fixture_id(name: str) -> str:
-    """Deterministic, salt-free ID for fixtures — stable across import sessions."""
-    return hashlib.sha256(f"FIXTURE:{name}".encode()).hexdigest()[:12]
 
 
 class StudentImporter:
@@ -126,7 +122,9 @@ class StudentImporter:
                 weight=weight,
             ))
 
-        return list(name_to_student.values())
+        students = list(name_to_student.values())
+        enforce_bidirectional(students)
+        return students
 
 
 class StudentExporter:

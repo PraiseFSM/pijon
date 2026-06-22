@@ -122,7 +122,6 @@ class Classroom:
         with open(filepath, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
         
-        print(f"Saved classroom to {filepath}")
         return filepath
     
     @classmethod

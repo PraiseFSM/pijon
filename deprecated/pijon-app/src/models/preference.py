@@ -7,7 +7,6 @@ class PreferenceTargetType(Enum):
     """What type of thing this preference is about"""
     STUDENT = "student"
     FURNITURE = "furniture"
-    LOCATION = "location"  # For future: regions like "front", "back", "window side"
 
 
 @dataclass
@@ -74,10 +73,3 @@ def prefer_furniture(furniture_id: str, weight: float = 1.0) -> Preference:
     )
 
 
-def prefer_location(location_id: str, weight: float = 1.0) -> Preference:
-    """Create a preference for a location (e.g., 'front', 'back', 'window')"""
-    return Preference(
-        target_type=PreferenceTargetType.LOCATION,
-        target_id=location_id,
-        weight=weight
-    )

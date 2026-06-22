@@ -35,10 +35,6 @@ class Student:
         """Get all preferences about furniture"""
         return [p for p in self.preferences if p.target_type == PreferenceTargetType.FURNITURE]
     
-    def get_location_preferences(self) -> List['Preference']:
-        """Get all preferences about locations"""
-        return [p for p in self.preferences if p.target_type == PreferenceTargetType.LOCATION]
-    
     def get_preference_for(self, target_id: str) -> Optional['Preference']:
         """Get preference for a specific target (student/furniture)"""
         for pref in self.preferences:

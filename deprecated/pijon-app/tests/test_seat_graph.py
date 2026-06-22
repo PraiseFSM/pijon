@@ -1,6 +1,6 @@
 import pytest
-from src.algorithm.seat_graph import SeatGraph, PROXIMITY_THRESHOLD, _fixture_id
-from src.io.csv_handler import fixture_id as csv_fixture_id
+from src.algorithm.seat_graph import SeatGraph, PROXIMITY_THRESHOLD
+from src.utils import fixture_id as _fixture_id
 from tests.conftest import make_classroom, desk, teacher_desk
 
 
@@ -92,15 +92,13 @@ class TestFixtures:
         sentinel = g.fixtures["td"]
         assert sentinel.metadata.get("is_fixture")
 
-    def test_fixture_sentinel_id_matches_csv_fixture_id(self):
-        """fixture_id() in seat_graph and csv_handler must be identical."""
+    def test_fixture_sentinel_id_matches_utils_fixture_id(self):
+        """SeatGraph uses utils.fixture_id — sentinel ID must match the canonical function."""
         c = make_classroom(teacher_desk("td", 0, 0))
         g = SeatGraph(c)
         sentinel = g.fixtures["td"]
-        # The sentinel name is derived from the FurnitureType value
         name = "Teacher Desk"
         assert sentinel.id == _fixture_id(name)
-        assert sentinel.id == csv_fixture_id(name)
 
     def test_fixture_id_to_fid_reverse_map(self):
         c = make_classroom(teacher_desk("td", 0, 0))

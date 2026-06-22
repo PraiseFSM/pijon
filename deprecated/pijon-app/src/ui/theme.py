@@ -59,3 +59,41 @@ NEIGHBOR_NONE_BORDER   = "#BDBDBD"
 TAB_BAR_BG           = "#1E2D3D"
 TAB_SELECTED_BG      = "#2C3E50"
 TAB_TEXT             = "#ECF0F1"
+
+
+def toolbar_stylesheet() -> str:
+    return f"""
+        QWidget#toolbar {{
+            background-color: {TOOLBAR_BG};
+        }}
+        QPushButton {{
+            background-color: {TOOLBAR_BTN_BG};
+            color: {TOOLBAR_TEXT};
+            border: 1px solid {TOOLBAR_BTN_BORDER};
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+        }}
+        QPushButton:hover {{
+            background-color: {TOOLBAR_BTN_HOVER};
+        }}
+        QPushButton:pressed {{
+            background-color: {TOOLBAR_BTN_PRESSED};
+        }}
+        QPushButton:checked {{
+            background-color: {TOOLBAR_BTN_CHECKED};
+            border-color: {TOOLBAR_BTN_CHECKED};
+        }}
+        QLabel {{
+            color: {TOOLBAR_LABEL_COLOR};
+            font-size: 12px;
+        }}
+        QSpinBox, QDoubleSpinBox, QComboBox {{
+            background-color: {TOOLBAR_BTN_BG};
+            color: {TOOLBAR_TEXT};
+            border: 1px solid {TOOLBAR_BTN_BORDER};
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }}
+    """

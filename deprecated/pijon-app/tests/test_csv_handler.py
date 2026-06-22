@@ -2,7 +2,8 @@ import csv
 import pytest
 import tempfile
 import os
-from src.io.csv_handler import StudentImporter, StudentExporter, FULL_FORMAT_HEADER, fixture_id
+from src.io.csv_handler import StudentImporter, StudentExporter, FULL_FORMAT_HEADER
+from src.utils import fixture_id
 from src.models.preference import PreferenceTargetType
 
 

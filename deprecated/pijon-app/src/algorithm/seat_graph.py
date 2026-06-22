@@ -1,16 +1,11 @@
-import hashlib
 from typing import Dict, List, Set
 from src.models.classroom import Classroom
 from src.models.furniture import Furniture
 from src.models.student import Student
+from src.utils import fixture_id as _fixture_id
 
 
 PROXIMITY_THRESHOLD = 1.5  # grid units; 1.5 captures direct + diagonal neighbors
-
-
-def _fixture_id(name: str) -> str:
-    """Same logic as csv_handler.fixture_id — kept local to avoid cross-package import."""
-    return hashlib.sha256(f"FIXTURE:{name}".encode()).hexdigest()[:12]
 
 
 class SeatGraph:
@@ -58,7 +53,7 @@ class SeatGraph:
             self.nodes[f.furniture_id] = f
             self.edges[f.furniture_id] = []
 
-            if f.get_seats():
+            if f.seat_count() > 0:
                 self.assignable.add(f.furniture_id)
             else:
                 # Non-seat furniture becomes a fixture node. The sentinel uses a

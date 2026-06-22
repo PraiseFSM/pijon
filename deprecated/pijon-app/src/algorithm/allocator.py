@@ -69,9 +69,9 @@ class GreedyAllocator(BaseAllocator):
       - For each of S's preferences targeting an already-placed student or fixture:
           if they would be neighbors → cost += -weight
           (avoid: -(-1) = +1 penalty; prefer: -(+1) = -1 reward)
-      - For each already-placed student T with a preference targeting S:
-          if T's seat would neighbor X → cost += -weight
-          (makes preferences bidirectional even when only one side declared them)
+
+    Preferences are stored bidirectionally at write time (see src/utils.py), so
+    there is no need for a reverse lookup here.
 
     Tie-breaking among equally-scored seats is random.
     """
@@ -142,12 +142,6 @@ class GreedyAllocator(BaseAllocator):
             elif pref.target_type == PreferenceTargetType.FURNITURE:
                 fixture_fid = seat_graph.fixture_id_to_fid.get(pref.target_id)
                 if fixture_fid and seat_graph.are_neighbors(seat_fid, fixture_fid):
-                    cost -= pref.weight
-
-        # Preferences of already-placed students that target this student
-        for placed_fid, placed_student in assignments.items():
-            for pref in placed_student.preferences:
-                if pref.target_id == student.id and seat_graph.are_neighbors(seat_fid, placed_fid):
                     cost -= pref.weight
 
         return cost

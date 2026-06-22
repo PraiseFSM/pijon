@@ -2,7 +2,6 @@ import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget
 from PyQt6.QtCore import Qt
 
-from src.ui.setup_widget import SetupWidget
 from src.ui.classroom_builder import ClassroomBuilderWidget
 from src.ui.student_placer import StudentPlacerWidget
 from src.ui import theme

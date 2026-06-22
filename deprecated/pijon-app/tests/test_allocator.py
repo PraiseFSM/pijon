@@ -168,15 +168,17 @@ class TestMarginalCost:
         assert cost_next < cost_far
 
     def test_bidirectional_cost(self):
-        # Bob avoids Alice, but Alice has no preferences.
-        # Placing Alice next to Bob should still incur a cost.
+        # Preferences are stored bidirectionally: if Bob avoids Alice, Alice
+        # also has Bob's ID in her preferences (enforced at write time, not
+        # at allocation time).  The allocator only looks at each student's own
+        # preference list; the reverse loop was removed to avoid double-counting.
         c, g = self._setup()
-        alice = student("s1", "Alice")
-        bob = student("s2", "Bob", avoid("s1", -5.0))
+        alice = student("s1", "Alice", avoid("s2", -5.0))  # mirror of bob's avoid
+        bob   = student("s2", "Bob",   avoid("s1", -5.0))
         g.assign("b", bob)
         allocator = GreedyAllocator()
         cost_next = allocator._marginal_cost(alice, "a", {"b": bob}, {"s2": "b"}, g)
-        cost_far = allocator._marginal_cost(alice, "c", {"b": bob}, {"s2": "b"}, g)
+        cost_far  = allocator._marginal_cost(alice, "c", {"b": bob}, {"s2": "b"}, g)
         assert cost_next > cost_far
 
     def test_no_preferences_zero_cost(self):

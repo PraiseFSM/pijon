@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple, Type
 from src.models.student import Student
 from src.models.preference import Preference, PreferenceTargetType
 from src.algorithm.allocator import BaseAllocator, BogoAllocator, GreedyAllocator
+from src.utils import mirror_student_preference, remove_mirror_preference
 
 
 # Registry of available algorithms: (display name, description, class)
@@ -163,34 +164,46 @@ class StudentOptionsDialog(QDialog):
             self.prefs_table.setItem(i, 2, QTableWidgetItem(str(pref.weight)))
     
     def add_preference(self):
-        """Add a new preference"""
         dialog = PreferenceEditDialog(None, self.all_students, self.student, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             pref = dialog.get_preference()
             self.student.add_preference(pref)
+            if pref.target_type == PreferenceTargetType.STUDENT:
+                target = next((s for s in self.all_students if s.id == pref.target_id), None)
+                if target:
+                    mirror_student_preference(self.student, target, pref.weight)
             self.update_prefs_table()
-    
+
     def edit_preference(self):
-        """Edit selected preference"""
         row = self.prefs_table.currentRow()
         if row < 0:
             QMessageBox.warning(self, "No Selection", "Please select a preference to edit.")
             return
-        
-        pref = self.student.preferences[row]
-        dialog = PreferenceEditDialog(pref, self.all_students, self.student, self)
+
+        old_pref = self.student.preferences[row]
+        dialog = PreferenceEditDialog(old_pref, self.all_students, self.student, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_pref = dialog.get_preference()
+            # Remove old mirror if student target changed
+            if (old_pref.target_type == PreferenceTargetType.STUDENT and
+                    old_pref.target_id != new_pref.target_id):
+                remove_mirror_preference(self.student, old_pref.target_id, self.all_students)
             self.student.preferences[row] = new_pref
+            if new_pref.target_type == PreferenceTargetType.STUDENT:
+                target = next((s for s in self.all_students if s.id == new_pref.target_id), None)
+                if target:
+                    mirror_student_preference(self.student, target, new_pref.weight)
             self.update_prefs_table()
-    
+
     def remove_preference(self):
-        """Remove selected preference"""
         row = self.prefs_table.currentRow()
         if row < 0:
             QMessageBox.warning(self, "No Selection", "Please select a preference to remove.")
             return
-        
+
+        pref = self.student.preferences[row]
+        if pref.target_type == PreferenceTargetType.STUDENT:
+            remove_mirror_preference(self.student, pref.target_id, self.all_students)
         self.student.preferences.pop(row)
         self.update_prefs_table()
     
@@ -228,7 +241,7 @@ class PreferenceEditDialog(QDialog):
         
         # Target type
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["Student", "Furniture", "Location"])
+        self.type_combo.addItems(["Student", "Furniture"])
         self.type_combo.currentTextChanged.connect(self.on_type_changed)
         layout.addRow("Target Type:", self.type_combo)
         
@@ -263,8 +276,6 @@ class PreferenceEditDialog(QDialog):
                 self.type_combo.setCurrentText("Student")
             elif self.preference.target_type == PreferenceTargetType.FURNITURE:
                 self.type_combo.setCurrentText("Furniture")
-            else:
-                self.type_combo.setCurrentText("Location")
         else:
             self.type_combo.setCurrentText("Student")
         
@@ -289,12 +300,6 @@ class PreferenceEditDialog(QDialog):
             self.target_combo.addItem("Back of Room", "back_area")
             self.target_combo.addItem("Door", "door")
             self.target_combo.addItem("Window", "window")
-        
-        elif type_text == "Location":
-            self.target_combo.addItem("Front", "front")
-            self.target_combo.addItem("Back", "back")
-            self.target_combo.addItem("Left Side", "left")
-            self.target_combo.addItem("Right Side", "right")
     
     def get_preference(self) -> Preference:
         """Get the preference from the dialog"""
@@ -302,12 +307,10 @@ class PreferenceEditDialog(QDialog):
         target_id = self.target_combo.currentData()
         weight = self.weight_spin.value()
         
-        if type_text == "Student":
-            target_type = PreferenceTargetType.STUDENT
-        elif type_text == "Furniture":
+        if type_text == "Furniture":
             target_type = PreferenceTargetType.FURNITURE
         else:
-            target_type = PreferenceTargetType.LOCATION
+            target_type = PreferenceTargetType.STUDENT
         
         return Preference(
             target_type=target_type,
