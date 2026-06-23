@@ -34,7 +34,7 @@
  * LOCAL-FIRST: no fetch(), no XHR, no WebSocket. All writes go through the Zustand store.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureKind, Vec2 } from '../../domain/types.js';
 import { furnitureId } from '../../domain/types.js';
@@ -45,8 +45,8 @@ import { resizeButtonRects, hitButton, ghostRingCells, type ResizeButton } from 
 import { usePijonStore } from '../../state/store.js';
 import { getImage } from '../canvas/imageCache.js';
 import { furnitureAssetUrl, ASSET } from '../../assets/paths.js';
-import { makeClassroom, canRemoveEdge } from '../../domain/classroom.js';
-import type { Classroom } from '../../domain/classroom.js';
+import { makeClassroom, canRemoveEdge, granularityConflicts } from '../../domain/classroom.js';
+import type { Classroom, GranularityConflict } from '../../domain/classroom.js';
 
 /**
  * 5.A1 — Filter the resize buttons so a MINUS (remove) button is shown only at
@@ -107,6 +107,11 @@ import {
   ghostRingMinusButtonStroke,
   ghostRingMinusButtonText,
   ghostRingMinusButtonHoverFill,
+  granFixConflictFill,
+  granFixConflictStroke,
+  granFixGhostAlpha,
+  granFixGhostStroke,
+  granFixArrowColor,
 } from '../../theme/colors.js';
 
 // ---------------------------------------------------------------------------
@@ -299,6 +304,51 @@ let hoveredButton: ResizeButton | null = null;
 let repaintFn: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
+// §6.C2 — Granularity fix-mode state
+//
+// When the teacher tries to decrease granularity but one or more pieces are
+// not on a coarse-unit boundary, we enter "fix mode": the pending target
+// granularity is stored here, the overlay highlights offending pieces RED,
+// draws GHOST COPIES at their nearest valid positions, and draws GHOST ARROWS
+// from each piece to its ghost.
+//
+// The conflict set is recomputed from the live store classroom on every paint
+// call so it updates as the teacher drags pieces around. When the conflict set
+// becomes empty for the pending G, we auto-apply the change and exit fix mode.
+//
+// Cancel: the teacher can click the current active granularity button (already
+// active, so it re-selects and clears fix mode) or click ✕ on the fix banner.
+// ---------------------------------------------------------------------------
+
+/**
+ * The granularity the teacher is trying to change to (null = not in fix mode).
+ * Module-level so paintOverlay can read it without a closure.
+ *
+ * Written only via setGranFixPendingG() so ESLint react-hooks/globals does not
+ * flag it as an illegal module-variable reassignment from within a component.
+ */
+let granFixPendingG: number | null = null;
+
+/** Set the pending granularity for fix mode. Call from event handlers, not render. */
+function setGranFixPendingG(g: number | null): void {
+  granFixPendingG = g;
+}
+
+/**
+ * Callback registered by FurnitureToolbar so that paintOverlay (which runs
+ * outside React) can trigger an auto-apply + exit when conflicts reach zero.
+ * Set on toolbar mount, cleared on unmount and in deactivate.
+ *
+ * Written only via setGranFixAutoApplyFn() for the same ESLint-hygiene reason.
+ */
+let granFixAutoApplyFn: ((g: number) => void) | null = null;
+
+/** Register or clear the auto-apply callback. */
+function setGranFixAutoApplyFn(fn: ((g: number) => void) | null): void {
+  granFixAutoApplyFn = fn;
+}
+
+// ---------------------------------------------------------------------------
 // §13.1 — Palette drag-over preview (live canvas preview while dragging from palette)
 // ---------------------------------------------------------------------------
 
@@ -344,6 +394,11 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
    * Set when the user tries to apply an invalid granularity; cleared on success.
    */
   const [granularityWarning, setGranularityWarning] = useState<string | null>(null);
+  /**
+   * §6.C2 — Fix-mode pending granularity (mirrors the module-level granFixPendingG
+   * but held in React state so the banner re-renders correctly).
+   */
+  const [fixModeG, setFixModeG] = useState<number | null>(null);
   /** §14.5 — grid color picker open state */
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
 
@@ -385,20 +440,104 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   // setGranularity never rejects on divisibility between them). Applied
   // immediately on select; the non-blocking banner surfaces the rare case where
   // scaling back down rejects (furniture not on a coarse-unit boundary).
+  //
+  // §6.C2 — When a decrease is blocked by conflicts, we enter "fix mode":
+  //   - granFixPendingG is set to the target G.
+  //   - The banner updates to guide the teacher.
+  //   - paintOverlay draws the ghost-fix overlay.
+  //   - Re-clicking the SAME pending G while in fix mode re-attempts the apply.
+  //   - Selecting the current active G cancels fix mode.
+  //   - Selecting a DIFFERENT G (neither active nor pending) switches the target.
   const handleGranularitySelect = (g: number) => {
-    if (g === classroom.cellsPerUnit) return;
+    // §6.C2 — Cancel fix mode by re-selecting the currently active G
+    if (g === classroom.cellsPerUnit) {
+      if (granFixPendingG !== null) {
+        setGranFixPendingG(null);
+        setFixModeG(null);
+        setGranularityWarning(null);
+        ctx.canvas.requestRepaint();
+      }
+      return;
+    }
+
+    // §6.C2 — If in fix mode and teacher re-clicks the pending G, attempt apply
+    if (g === granFixPendingG) {
+      const remaining = granularityConflicts(classroom, g);
+      if (remaining.length === 0) {
+        // All conflicts resolved — apply now
+        try {
+          ctx.store.setGranularity(g);
+        } catch (applyErr) {
+          // Shouldn't happen if granularityConflicts is accurate; surface as warning
+          const msg = applyErr instanceof Error ? applyErr.message : `Can not set granularity to ${g.toString()}.`;
+          setGranularityWarning(msg);
+          return;
+        }
+        setGranFixPendingG(null);
+        setFixModeG(null);
+        setGranularityWarning(null);
+        ctx.canvas.requestRepaint();
+      }
+      // Else: still conflicts — nothing to do, overlay is already live
+      return;
+    }
+
+    // Normal path: try to apply directly
     try {
       ctx.store.setGranularity(g);
+      // Success — clear any fix mode / warning
+      setGranFixPendingG(null);
+      setFixModeG(null);
       setGranularityWarning(null);
       ctx.canvas.requestRepaint();
     } catch (err) {
       const msg =
         err instanceof Error
           ? err.message
-          : `Can't set granularity to ${g.toString()} — move furniture onto unit boundaries first.`;
+          : `Can not set granularity to ${g.toString()} — move furniture onto unit boundaries first.`;
+      // §6.C2 — Enter fix mode ONLY for decreases (the case where furniture
+      // may be off a coarse-unit boundary). Increases always succeed in practice;
+      // if they somehow throw (e.g. in tests with mock stores), show the raw
+      // error banner without entering fix mode.
+      if (g < classroom.cellsPerUnit) {
+        setGranFixPendingG(g);
+        setFixModeG(g);
+      }
       setGranularityWarning(msg);
+      ctx.canvas.requestRepaint();
     }
   };
+
+  /** §6.C2 — Cancel fix mode (called by the ✕ on the fix-mode banner). */
+  const handleCancelFixMode = () => {
+    setGranFixPendingG(null);
+    setFixModeG(null);
+    setGranularityWarning(null);
+    ctx.canvas.requestRepaint();
+  };
+
+  // §6.C2 — Register the auto-apply callback so paintOverlay can trigger it
+  // when the conflict count reaches zero. Updated every render via the setter
+  // so the closure is always fresh (captures latest ctx.store / setState refs).
+  setGranFixAutoApplyFn((g: number) => {
+    try {
+      ctx.store.setGranularity(g);
+    } catch {
+      return; // something went wrong — leave fix mode active
+    }
+    setGranFixPendingG(null);
+    setFixModeG(null);
+    setGranularityWarning(null);
+    ctx.canvas.requestRepaint();
+  });
+
+  // §6.C2 — Clean up the auto-apply callback when the toolbar unmounts so a
+  // stale closure never fires after the editor has been deactivated.
+  useEffect(() => {
+    return () => {
+      setGranFixAutoApplyFn(null);
+    };
+  }, []);
 
   /** §14.5 — Handle live grid color changes from the picker (onInput = continuous). */
   const handleGridColorChange = useCallback(
@@ -461,7 +600,7 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         </div>
       )}
 
-      {/* §polish Fix 2 — Granularity warning banner (non-blocking, dismissable) */}
+      {/* §polish Fix 2 + §6.C2 — Granularity warning / fix-mode banner */}
       {granularityWarning !== null && (
         <div
           style={{
@@ -475,11 +614,20 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
             color: bannerWarningText,
           }}
         >
-          <span style={{ flex: 1 }}>⚠ {granularityWarning}</span>
+          {fixModeG !== null ? (
+            /* §6.C2 — Fix-mode banner: explain and guide */
+            <span style={{ flex: 1 }}>
+              ⚠ Move the red pieces to the highlighted positions (granularity {fixModeG.toString()} target). Click{' '}
+              <strong>{fixModeG.toString()}</strong> again to apply when they are in place.
+            </span>
+          ) : (
+            <span style={{ flex: 1 }}>⚠ {granularityWarning}</span>
+          )}
           <button
             type="button"
-            onClick={() => { setGranularityWarning(null); }}
+            onClick={fixModeG !== null ? handleCancelFixMode : () => { setGranularityWarning(null); }}
             style={{ ...btn, padding: '1px 7px', fontSize: '0.74rem', color: bannerWarningText, borderColor: bannerWarningButtonBorder }}
+            data-testid="gran-fix-cancel"
           >
             ✕
           </button>
@@ -919,6 +1067,118 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
     ctx2d.fillRect(selectedRect.x, selectedRect.y, selectedRect.w, selectedRect.h);
   }
 
+  // --- §6.C2 Granularity ghost-fix overlay ---
+  // Only active when in fix mode (granFixPendingG is set).
+  // Conflict list is recomputed live from the store each paint frame so it
+  // updates as the teacher drags pieces around. When the list becomes empty
+  // we auto-apply and exit fix mode via granFixAutoApplyFn.
+  if (granFixPendingG !== null) {
+    const fixClassroom = usePijonStore.getState().classroom;
+    const conflicts: readonly GranularityConflict[] = granularityConflicts(fixClassroom, granFixPendingG);
+
+    if (conflicts.length === 0 && granFixAutoApplyFn !== null) {
+      // All conflicts resolved — schedule auto-apply outside the paint call
+      // (can't call React state setters synchronously inside a canvas paint).
+      const applyG = granFixPendingG;
+      const applyFn = granFixAutoApplyFn;
+      // Clear module-level state immediately so a second paint doesn't re-fire
+      granFixPendingG = null;
+      granFixAutoApplyFn = null;
+      setTimeout(() => { applyFn(applyG); }, 0);
+    } else {
+      const originPx = view.originOffset * view.cellSize;
+      const cs = view.cellSize;
+
+      for (const conflict of conflicts) {
+        // Find the furniture piece to get its kind/w/h for drawing
+        const f = fixClassroom.furniture.find((fu) => fu.id === conflict.id);
+        if (f === undefined) continue;
+
+        // 1. Red tint + stroke over the offending piece (reuse violation style)
+        const fromR = {
+          x: conflict.from.x * cs + originPx,
+          y: conflict.from.y * cs + originPx,
+          w: f.w * cs,
+          h: f.h * cs,
+        };
+        ctx2d.save();
+        ctx2d.fillStyle = granFixConflictFill;
+        ctx2d.fillRect(fromR.x, fromR.y, fromR.w, fromR.h);
+        ctx2d.strokeStyle = granFixConflictStroke;
+        ctx2d.lineWidth = 2.5;
+        ctx2d.strokeRect(fromR.x + 0.5, fromR.y + 0.5, fromR.w - 1, fromR.h - 1);
+        ctx2d.restore();
+
+        // 2. Ghost copy at the nearest valid position
+        const toR = {
+          x: conflict.to.x * cs + originPx,
+          y: conflict.to.y * cs + originPx,
+          w: f.w * cs,
+          h: f.h * cs,
+        };
+        // Only draw ghost if it's at a different position from current
+        if (conflict.to.x !== conflict.from.x || conflict.to.y !== conflict.from.y) {
+          paintFurnitureRect(ctx2d, f.kind, toR, granFixGhostAlpha);
+          ctx2d.save();
+          ctx2d.strokeStyle = granFixGhostStroke;
+          ctx2d.lineWidth = 2;
+          ctx2d.setLineDash([4, 3]);
+          ctx2d.strokeRect(toR.x + 0.5, toR.y + 0.5, toR.w - 1, toR.h - 1);
+          ctx2d.setLineDash([]);
+          ctx2d.restore();
+
+          // 3. Arrow from piece center → ghost center
+          const fromCx = fromR.x + fromR.w / 2;
+          const fromCy = fromR.y + fromR.h / 2;
+          const toCx = toR.x + toR.w / 2;
+          const toCy = toR.y + toR.h / 2;
+          const dx = toCx - fromCx;
+          const dy = toCy - fromCy;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len > 2) {
+            const ux = dx / len;
+            const uy = dy / len;
+            const arrowHeadLen = Math.min(12, len * 0.3);
+            const arrowHeadAngle = Math.PI / 6; // 30°
+            const tipX = toCx;
+            const tipY = toCy;
+            const tailX = fromCx + ux * Math.min(fromR.w / 2, len * 0.35);
+            const tailY = fromCy + uy * Math.min(fromR.h / 2, len * 0.35);
+
+            ctx2d.save();
+            ctx2d.strokeStyle = granFixArrowColor;
+            ctx2d.fillStyle = granFixArrowColor;
+            ctx2d.lineWidth = 2;
+
+            // Shaft
+            ctx2d.beginPath();
+            ctx2d.moveTo(tailX, tailY);
+            ctx2d.lineTo(
+              tipX - ux * arrowHeadLen,
+              tipY - uy * arrowHeadLen,
+            );
+            ctx2d.stroke();
+
+            // Arrowhead
+            ctx2d.beginPath();
+            ctx2d.moveTo(tipX, tipY);
+            ctx2d.lineTo(
+              tipX - arrowHeadLen * (ux * Math.cos(arrowHeadAngle) - uy * Math.sin(arrowHeadAngle)),
+              tipY - arrowHeadLen * (uy * Math.cos(arrowHeadAngle) + ux * Math.sin(arrowHeadAngle)),
+            );
+            ctx2d.moveTo(tipX, tipY);
+            ctx2d.lineTo(
+              tipX - arrowHeadLen * (ux * Math.cos(-arrowHeadAngle) - uy * Math.sin(-arrowHeadAngle)),
+              tipY - arrowHeadLen * (uy * Math.cos(-arrowHeadAngle) + ux * Math.sin(-arrowHeadAngle)),
+            );
+            ctx2d.stroke();
+            ctx2d.restore();
+          }
+        }
+      }
+    }
+  }
+
   ctx2d.restore();
 }
 
@@ -966,6 +1226,9 @@ export const FurnitureEditor: EditorMode = {
     dropCollisionFlash = false;
     paletteDragPreview = null;
     hoveredButton = null;
+    // §6.C2 — Always reset fix mode on activate (fresh start)
+    granFixPendingG = null;
+    granFixAutoApplyFn = null;
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -976,6 +1239,9 @@ export const FurnitureEditor: EditorMode = {
     dropCollisionFlash = false;
     paletteDragPreview = null;
     hoveredButton = null;
+    // §6.C2 — Reset fix mode on deactivate so no artefacts remain
+    granFixPendingG = null;
+    granFixAutoApplyFn = null;
     // Clear the cross-browser drag kind stash — important if the teacher switches
     // editors mid-drag (unlikely but guards against any stale state).
     clearDraggedKindStash();

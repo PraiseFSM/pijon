@@ -162,19 +162,32 @@ multi-seat tables, custom images. Constraints that keep resizing sane:
   from ever sitting "on top of" a − button (the button simply isn't there when removal is illegal).
 - The **+ / − resize buttons keep a constant physical size of one unit (1×1)** regardless of
   granularity — exactly like furniture keeps its real size when the grid densifies.
+- **Grid lines show a thickness hierarchy by granularity:** unit boundaries (the G=1 lines) are the
+  boldest; each finer subdivision is drawn thinner (so at G=2 the half-unit lines are lighter, and at
+  G=4 the quarter-unit lines lighter still). This keeps the underlying unit grid legible as cells densify.
+- **Scroll-wheel zoom:** the wheel zooms the grid larger/smaller (changes the on-screen size only, not
+  the classroom's units or furniture's real size).
 
 **Grid granularity** — finer cell density for more precise furniture placement *without* changing
 furniture's real size. Granularity is restricted to **1, 2, or 4** (powers of two, so every change is
 a clean multiple/divisor and furniture positions always scale to whole cells). Nearness thresholds are
 stored in real units, so proximity/violations/neighbors stay correct across granularity changes.
+When **decreasing** granularity is blocked because a piece of furniture isn't on a coarse-unit
+boundary, Pijon doesn't just show an error — it shows the fix **visually** (like the violation view):
+the offending furniture is highlighted **red**, a **ghost copy** appears at the nearest valid location,
+and a **ghost arrow** points from the piece to that spot to recommend the move. The ghost updates live
+as the teacher drags the piece (disappearing once it's valid, reappearing with a new target if the new
+spot is still invalid).
 
 **Roster** — add students manually (type a name) or import from CSV (the manual add box sits just
 above the Import-CSV control, which is the last item in the roster panel); edit names; add / remove
 students; export. (Later: import from a pasted spreadsheet column.)
 
 **Seating** — the Students editor **top bar** holds, in order: **Allocate**, **Clear**, **Undo /
-Redo**, a **weight selector** (−2, −1, +1, +2 — the strength applied to the next preference link),
-**Export** and **Import** (the portable **`.pijon` project file**), and **Settings**. Beyond the
+Redo**, a **weight selector** (−2, −1, +1, +2 — the strength applied to the next preference link)
+together with an **assigner-mode toggle** in the same section (a clear on/off **toggle lever**), **Export**
+and **Import** (the portable **`.pijon` project file**), and **Settings**. When assigner mode is on, the
+**cursor changes** to signal it (a red cursor for now, swappable for a custom image later). Beyond the
 toolbar: drag students between desks (swap/move); **drag a student straight from the roster onto a
 desk** (same behaviour as dragging between desks — seat them, swapping if occupied); lock a student to
 a desk so suggestions won't move them; show constraint violations (on by default, kept live as
@@ -188,12 +201,15 @@ allocate, violations, and neighbor preview always agree); the **Show Violations*
 on); and the **Show Links** toggle for preference lines.
 
 **Preferences** (inside the Students editor, single left panel) — set "near / avoid" between students
-and toward room features. Preferences are created **without a dedicated "add preference" form**: turn
-on **assigner mode** and click two students to link them at the currently-selected weight, or use
-drag/seat interactions. The **weight is chosen from four fixed options — −2, −1, +1, +2** (avoid
-strong/weak, prefer weak/strong) in the top-bar selector. Selecting a student shows their **summary and
-their preference list directly beneath them** in the roster panel, each entry removable. All
-student↔student preferences are mutual.
+and toward room features. The **weight is chosen from four fixed options — −2, −1, +1, +2** (avoid
+strong/weak, prefer weak/strong). This **weight selector is a single shared component** used both in the
+top bar and on every preference row, so they always look identical and a future icon change updates all
+of them at once. Selecting a student opens their menu **directly beneath them** in the roster: their
+name, then **one row per other student they already have a preference with** — each row showing that
+student's name, the same weight selector (set to the current weight), and an **✕ to remove** — plus a
+control to **add another student** to their preferences. The assigner toggle does **not** live in this
+menu (it's in the top bar). New links are made via **assigner mode** (toggle on, click two students at
+the selected weight) or drag/seat interactions. All student↔student preferences are mutual.
 
 **Look & feel (assets & theming)** — Pijon should be easy to make pretty and easy to re-skin:
 - An **`assets/` folder** holds all images, each with a fixed expected filename, documented in an
@@ -237,9 +253,10 @@ that process is itself a design goal: it must stay legible, testable, and repeat
    **best method** in the TODO (and amends this outline when the feedback changes *what Pijon is*).
    This outline is the yardstick: work that drifts from the Design Goals is corrected, not shipped.
    **Feedback-form lifecycle:** a filled-in feedback form is *processed* — translated into outline
-   edits and concrete TODO entries — and **once that translation is complete the form file is
-   deleted**, so an empty/absent form always means "nothing pending." Only delete it after the
-   outline + TODO fully capture the feedback.
+   edits and concrete TODO entries — and **once that translation is complete the form's content is
+   cleared (emptied) back to its blank template; the file itself is kept, never deleted**. An empty
+   form always means "nothing pending." Only clear it after the outline + TODO fully capture the
+   feedback.
 3. **The conductor decomposes the work** into manageable, well-scoped chunks and **spins up
    sub-agents** on a model appropriate to each chunk (cheaper/faster where the task allows) to
    implement them.

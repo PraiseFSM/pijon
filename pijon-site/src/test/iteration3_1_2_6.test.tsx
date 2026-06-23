@@ -464,46 +464,57 @@ describe('§13.6 AssignerHint renders in StudentToolbar', () => {
 // ---------------------------------------------------------------------------
 
 describe('§13.6 StudentPreferencesPanel: assigner toggle', () => {
+  // §6.A3: assigner toggle moved from SidePanel to Toolbar.
+  // Tests updated to render the Toolbar and find the toggle lever.
   beforeEach(() => { resetStore(); });
 
-  // Helper: build ctx with a selected student so the pref-detail/assigner section appears
-  function makeCtxWithSelectedStudent() {
+  // Helper: build ctx
+  function makeCtxForAssigner() {
     const alice = makeStudent(mkStudentId('alice-toggle'), 'Alice');
     usePijonStore.setState({ roster: [alice] });
     return { store: makeStoreMock({ roster: [alice], selectedStudentId: alice.id }), canvas: makeCanvasMock(), persistence: null } as EditorContext;
   }
 
-  it('renders the assigner toggle button when a student is selected', () => {
-    const ctx = makeCtxWithSelectedStudent();
+  it('renders the assigner toggle lever in the Toolbar (§6.A3)', () => {
+    const ctx = makeCtxForAssigner();
+    StudentEditor.activate(ctx);
     act(() => {
-      render(React.createElement(StudentEditor.SidePanel, { ctx }));
+      render(React.createElement(StudentEditor.Toolbar, { ctx }));
     });
-    // Should find the "Enable Assigner" button inside the pref-detail section
-    const btn = screen.queryByText('Enable Assigner') ?? screen.queryByText(/assigner/i);
-    expect(btn).toBeTruthy();
+    // §6.A3: assigner toggle is now in the Toolbar as a lever
+    const lever = screen.queryByTestId('assigner-toggle-lever');
+    expect(lever).toBeTruthy();
+    StudentEditor.deactivate(ctx);
   });
 
-  it('toggling assigner ON changes button text to include "Assigner ON"', () => {
-    const ctx = makeCtxWithSelectedStudent();
+  it('toggling assigner ON changes lever aria-pressed to true', () => {
+    const ctx = makeCtxForAssigner();
+    StudentEditor.activate(ctx);
     act(() => {
-      render(React.createElement(StudentEditor.SidePanel, { ctx }));
+      render(React.createElement(StudentEditor.Toolbar, { ctx }));
     });
-    const toggleBtn = screen.getByText('Enable Assigner');
-    act(() => { fireEvent.click(toggleBtn); });
-    expect(screen.getByText(/Assigner ON/i)).toBeTruthy();
+    const lever = screen.getByTestId('assigner-toggle-lever');
+    expect(lever.getAttribute('aria-pressed')).toBe('false');
+    act(() => { fireEvent.click(lever); });
+    expect(lever.getAttribute('aria-pressed')).toBe('true');
+    StudentEditor.deactivate(ctx);
   });
 
-  it('toggling assigner mode OFF clears the hint (test via module callback)', () => {
-    const ctx = makeCtxWithSelectedStudent();
+  it('toggling assigner mode OFF resets lever to aria-pressed=false', () => {
+    const ctx = makeCtxForAssigner();
+    StudentEditor.activate(ctx);
     act(() => {
-      render(React.createElement(StudentEditor.SidePanel, { ctx }));
+      render(React.createElement(StudentEditor.Toolbar, { ctx }));
     });
+    const lever = screen.getByTestId('assigner-toggle-lever');
     // Toggle ON
-    act(() => { fireEvent.click(screen.getByText('Enable Assigner')); });
+    act(() => { fireEvent.click(lever); });
+    expect(lever.getAttribute('aria-pressed')).toBe('true');
     // Toggle OFF
-    act(() => { fireEvent.click(screen.getByText(/Assigner ON/i)); });
-    // Back to "Enable Assigner" state — no crash
-    expect(screen.getByText('Enable Assigner')).toBeTruthy();
+    act(() => { fireEvent.click(lever); });
+    // Back to OFF state
+    expect(lever.getAttribute('aria-pressed')).toBe('false');
+    StudentEditor.deactivate(ctx);
   });
 });
 
@@ -1030,13 +1041,12 @@ describe('§13.6 Pulse loop start/stop lifecycle', () => {
 
     StudentEditor.activate(ctx);
 
-    // Render SidePanel with the student selected — assigner toggle appears in the
-    // pref-detail section that shows when selectedStudentId is set (§5.B1)
+    // §6.A3: render the Toolbar to find/click the assigner toggle lever
     act(() => {
-      render(React.createElement(StudentEditor.SidePanel, { ctx }));
+      render(React.createElement(StudentEditor.Toolbar, { ctx }));
     });
     act(() => {
-      fireEvent.click(screen.getByText('Enable Assigner'));
+      fireEvent.click(screen.getByTestId('assigner-toggle-lever'));
     });
 
     // Click first student desk to start the pulse loop
@@ -1081,12 +1091,12 @@ describe('§13.6 Pulse loop start/stop lifecycle', () => {
 
     StudentEditor.activate(ctx);
 
-    // Render SidePanel with bob selected — assigner toggle visible (§5.B1)
+    // §6.A3: render the Toolbar to find/click the assigner toggle lever
     act(() => {
-      render(React.createElement(StudentEditor.SidePanel, { ctx }));
+      render(React.createElement(StudentEditor.Toolbar, { ctx }));
     });
     act(() => {
-      fireEvent.click(screen.getByText('Enable Assigner'));
+      fireEvent.click(screen.getByTestId('assigner-toggle-lever'));
     });
 
     // First click to start pulse
@@ -1149,21 +1159,17 @@ describe('§13.6 AssignerHint lifecycle (correct name, clears on events)', () =>
       persistence: null,
     };
 
-    // Render the Toolbar so AssignerHint is mounted and registers the callback
+    // Render the Toolbar so AssignerHint is mounted and registers the callback,
+    // and so the assigner toggle lever is available.
     act(() => {
       render(React.createElement(StudentEditor.Toolbar, { ctx }));
     });
 
     StudentEditor.activate(ctx);
 
-    // Render SidePanel with alice selected — assigner toggle visible (§5.B1)
+    // §6.A3: click the assigner toggle lever (now in the Toolbar)
     act(() => {
-      render(React.createElement(StudentEditor.SidePanel, { ctx }));
-    });
-    act(() => {
-      // Find and click the Enable Assigner button
-      const buttons = screen.getAllByText('Enable Assigner');
-      fireEvent.click(buttons[0]!);
+      fireEvent.click(screen.getByTestId('assigner-toggle-lever'));
     });
 
     // Click first student
@@ -1207,12 +1213,10 @@ describe('§13.6 AssignerHint lifecycle (correct name, clears on events)', () =>
 
     act(() => { render(React.createElement(StudentEditor.Toolbar, { ctx })); });
     StudentEditor.activate(ctx);
-    // Render SidePanel with carol selected — assigner toggle visible (§5.B1)
-    act(() => { render(React.createElement(StudentEditor.SidePanel, { ctx })); });
 
+    // §6.A3: click the assigner toggle lever (now in the Toolbar)
     act(() => {
-      const btns = screen.getAllByText('Enable Assigner');
-      fireEvent.click(btns[0]!);
+      fireEvent.click(screen.getByTestId('assigner-toggle-lever'));
     });
 
     act(() => {

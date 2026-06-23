@@ -102,7 +102,8 @@ describe('§5.B1 RightPanel removal', () => {
   });
 });
 
-describe('§5.B1 Assigner toggle inside SidePanel', () => {
+describe('§6.A3 Assigner toggle lever in Toolbar (moved from SidePanel)', () => {
+  // §6.A3: assigner toggle is now a lever in the top bar, NOT in the SidePanel.
   const alice = {
     id: makeSid('alice-b1'),
     name: 'Alice',
@@ -122,23 +123,26 @@ describe('§5.B1 Assigner toggle inside SidePanel', () => {
     StudentEditor.deactivate(ctx);
   });
 
-  it('shows assigner toggle only when a student is selected', () => {
-    render(<StudentEditor.SidePanel ctx={ctx} />);
-    expect(screen.getByRole('button', { name: /enable assigner/i })).toBeInTheDocument();
+  it('shows the assigner toggle lever in the Toolbar regardless of selection', () => {
+    render(<StudentEditor.Toolbar ctx={ctx} />);
+    expect(screen.getByTestId('assigner-toggle-lever')).toBeInTheDocument();
   });
 
-  it('shows no assigner toggle when no student is selected', () => {
-    const ctxNoSel = makeCtx({ roster: [alice] });
-    StudentEditor.activate(ctxNoSel);
-    render(<StudentEditor.SidePanel ctx={ctxNoSel} />);
-    expect(screen.queryByRole('button', { name: /enable assigner/i })).not.toBeInTheDocument();
-    StudentEditor.deactivate(ctxNoSel);
+  it('assigner lever is NOT inside the SidePanel student-pref-detail section', () => {
+    render(<StudentEditor.SidePanel ctx={ctx} />);
+    const detail = document.querySelector('[data-testid="student-pref-detail"]');
+    expect(detail).toBeTruthy();
+    // Assigner toggle should NOT be inside the pref detail
+    const leverInDetail = detail?.querySelector('[data-testid="assigner-toggle-lever"]');
+    expect(leverInDetail).toBeNull();
   });
 
-  it('toggling assigner ON shows Assigner ON button', () => {
-    render(<StudentEditor.SidePanel ctx={ctx} />);
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
-    expect(screen.getByRole('button', { name: /assigner on/i })).toBeInTheDocument();
+  it('toggling assigner lever ON sets aria-pressed=true', () => {
+    render(<StudentEditor.Toolbar ctx={ctx} />);
+    const lever = screen.getByTestId('assigner-toggle-lever');
+    expect(lever.getAttribute('aria-pressed')).toBe('false');
+    act(() => { fireEvent.click(lever); });
+    expect(lever.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('shows pref detail section (data-testid="student-pref-detail") for selected student', () => {
@@ -174,8 +178,11 @@ describe('§5.B1 Inline pref list in SidePanel', () => {
 
   it('renders preference entries inline below selected student', () => {
     render(<StudentEditor.SidePanel ctx={ctx} />);
-    // Alice has an avoid pref toward Bob
-    expect(screen.getByText('↓ Avoid')).toBeInTheDocument();
+    // §6.A2: pref rows now show WeightSelector buttons + target name (no "↓ Avoid" label)
+    // Bob appears as the target name in the pref row (also in roster, so use getAllByText)
+    expect(screen.getAllByText('Bob').length).toBeGreaterThan(0);
+    // Weight selector buttons should appear in the pref row
+    expect(document.querySelector('[data-testid="pref-row-0-weight-btn--1"]')).toBeTruthy();
   });
 
   it('renders ✕ remove buttons for each pref', () => {
@@ -196,13 +203,16 @@ describe('§5.B1 Inline pref list in SidePanel', () => {
 // §5.B2 — No add-preference form
 // ---------------------------------------------------------------------------
 
-describe('§5.B2 No add-preference form in SidePanel', () => {
+describe('§6.A2 Add-preference control in SidePanel', () => {
+  // §6.A2: the redesigned pref detail includes an add-student select + Add button
+  // when there are students not yet linked.
   const alice = { id: makeSid('alice-b2'), name: 'Alice', isFixture: false, preferences: [], metadata: {} as Record<string, unknown> };
+  const bob = { id: makeSid('bob-b2'), name: 'Bob', isFixture: false, preferences: [], metadata: {} as Record<string, unknown> };
 
   let ctx: EditorContext;
 
   beforeEach(() => {
-    ctx = makeCtx({ roster: [alice], selectedStudentId: alice.id });
+    ctx = makeCtx({ roster: [alice, bob], selectedStudentId: alice.id });
     StudentEditor.activate(ctx);
   });
 
@@ -210,18 +220,24 @@ describe('§5.B2 No add-preference form in SidePanel', () => {
     StudentEditor.deactivate(ctx);
   });
 
-  it('has no combobox (target student dropdown) in the pref section', () => {
+  it('shows an add-pref combobox when there are linkable students', () => {
     render(<StudentEditor.SidePanel ctx={ctx} />);
-    // No select element for adding prefs
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    // Bob is not yet linked to Alice — select should appear
+    expect(screen.queryByTestId('add-pref-select')).toBeInTheDocument();
   });
 
-  it('has no "Add" button that would add a preference', () => {
+  it('has an Add button for adding a preference', () => {
     render(<StudentEditor.SidePanel ctx={ctx} />);
-    // The only button labelled "Add" is the add-student button (aria-label="Add student")
-    // There must be NO button whose sole label is plain "Add" or "Add preference"
-    const addBtns = screen.queryAllByRole('button', { name: /^add$/i });
-    expect(addBtns).toHaveLength(0);
+    expect(screen.queryByTestId('add-pref-btn')).toBeInTheDocument();
+  });
+
+  it('selecting a student and clicking Add calls setMutualPreference', () => {
+    render(<StudentEditor.SidePanel ctx={ctx} />);
+    const select = screen.getByTestId('add-pref-select');
+    act(() => { fireEvent.change(select, { target: { value: bob.id } }); });
+    const addBtn = screen.getByTestId('add-pref-btn');
+    act(() => { fireEvent.click(addBtn); });
+    expect(ctx.store.setMutualPreference).toHaveBeenCalledWith(alice.id, bob.id, expect.any(Number));
   });
 });
 

@@ -51,7 +51,8 @@ export const canvasCardShadow = 'rgba(0,0,0,0.1)' as const; // card drop-shadow
 // 2. Canvas — grid & background
 // ---------------------------------------------------------------------------
 
-export const gridLine = '#d0d0d0' as const;              // grid line stroke
+export const gridLine = '#d0d0d0' as const;              // grid line stroke — unit boundaries (bold)
+export const gridLineSubunit = '#e4e4e4' as const;       // §6.B1 sub-unit grid lines (lighter)
 export const gridBackground = '#f8f8f8' as const;        // canvas clear-fill (background)
 
 // ---------------------------------------------------------------------------
@@ -157,6 +158,16 @@ export const gridDragOriginFade = 'rgba(240, 240, 240, 0.65)' as const;
 
 // Drop collision flash
 export const dropCollisionFlashFill = 'rgba(211, 47, 47, 0.25)' as const;
+
+// Granularity ghost-fix overlay (6.C2)
+// Offending piece: red tint + stroke (reuse violation palette from StudentEditor)
+export const granFixConflictFill = 'rgba(211, 47, 47, 0.22)' as const;
+export const granFixConflictStroke = 'rgba(211, 47, 47, 0.8)' as const;
+// Ghost copy at the nearest valid position: semi-transparent furniture tint
+export const granFixGhostAlpha = 0.42 as const;
+export const granFixGhostStroke = 'rgba(211, 47, 47, 0.55)' as const;
+// Arrow from piece center → ghost center
+export const granFixArrowColor = 'rgba(211, 47, 47, 0.75)' as const;
 
 // Palette item in FurnitureSidePanel (mirrors furniture fills)
 export const paletteItemBorder = '#ccc' as const;
@@ -321,6 +332,22 @@ export const dividerLight = '#eee' as const;  // finer dividers inside panels
 // ---------------------------------------------------------------------------
 // 13. Grid color picker (§14.5)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Assigner-mode cursor (§6.A4)
+// ---------------------------------------------------------------------------
+
+/**
+ * CSS `cursor` value applied to the canvas when assigner mode is ON.
+ * Currently a red SVG crosshair encoded as a data-URI so a future redesign
+ * can swap in a custom image with a one-line change to this constant.
+ *
+ * The SVG draws a 24×24 crosshair with a red circle at the centre.
+ * Hot-spot is centre (12,12); `crosshair` is the fallback for browsers that
+ * reject custom cursors.
+ */
+export const ASSIGNER_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'%3E%3Ccircle cx=\'12\' cy=\'12\' r=\'4\' fill=\'%23d32f2f\' fill-opacity=\'0.9\'/%3E%3Cline x1=\'12\' y1=\'2\' x2=\'12\' y2=\'9\' stroke=\'%23d32f2f\' stroke-width=\'2\'/%3E%3Cline x1=\'12\' y1=\'15\' x2=\'12\' y2=\'22\' stroke=\'%23d32f2f\' stroke-width=\'2\'/%3E%3Cline x1=\'2\' y1=\'12\' x2=\'9\' y2=\'12\' stroke=\'%23d32f2f\' stroke-width=\'2\'/%3E%3Cline x1=\'15\' y1=\'12\' x2=\'22\' y2=\'12\' stroke=\'%23d32f2f\' stroke-width=\'2\'/%3E%3C/svg%3E") 12 12, crosshair' as const;
 
 // ---------------------------------------------------------------------------
 // 14. Ghost ring / in-grid resize buttons (§14.7)

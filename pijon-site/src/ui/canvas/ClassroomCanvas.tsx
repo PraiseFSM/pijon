@@ -17,7 +17,7 @@
  * LOCAL-FIRST: no network calls. All data from the Zustand store.
  */
 
-import { useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react';
 import { usePijonStore } from '../../state/store.js';
 import { renderBasePass } from './render.js';
 import { registerRepaintCallback, primeImage } from './imageCache.js';
@@ -29,6 +29,17 @@ import { NoopEditor } from '../editors/NoopEditor.js';
 import type { Vec2 } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
 import { effectiveCellSize } from './cellSizeHelper.js';
+
+// ---------------------------------------------------------------------------
+// §6.B2 — Scroll-wheel zoom constants
+// ---------------------------------------------------------------------------
+
+/** Minimum zoom factor (base unit px multiplier). ~0.4× of the default. */
+const ZOOM_MIN = 0.4;
+/** Maximum zoom factor. 3× of the default. */
+const ZOOM_MAX = 3.0;
+/** Fraction of zoom per wheel tick (multiplicative step). */
+const ZOOM_STEP = 0.001;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -68,13 +79,22 @@ export interface ClassroomCanvasProps {
    * CanvasView without causing re-renders.
    */
   onViewReady?: (view: CanvasView) => void;
+
+  /**
+   * §6.A4 — CSS cursor value for the canvas element.
+   * When assigner mode is ON the shell passes ASSIGNER_CURSOR (a red crosshair
+   * data-URI from theme/colors.ts) here so the cursor changes without touching
+   * internal canvas logic. Defaults to 'crosshair' (normal StudentEditor cursor).
+   * Swap the red image for a custom one by changing the ASSIGNER_CURSOR constant.
+   */
+  cursor?: string;
 }
 
 // ---------------------------------------------------------------------------
 // ClassroomCanvas
 // ---------------------------------------------------------------------------
 
-export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onViewReady }: ClassroomCanvasProps) {
+export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onViewReady, cursor = 'crosshair' }: ClassroomCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // RAF handle stored in a ref (not state) so scheduling never triggers re-renders.
@@ -86,12 +106,22 @@ export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onView
 
   const activeEditor = editor ?? NoopEditor;
 
+  // §6.B2 — Zoom factor (multiplicative, applied to base unit px).
+  // Lives in component state so zoom changes trigger re-renders and
+  // re-fire onViewReady (geometry changes when zoom changes).
+  const [zoom, setZoom] = useState(1.0);
+
+  // §6.B2 — Zoomed base unit: cellSize * zoom, clamped to valid range.
+  const zoomedCellSize = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom)) * cellSize;
+
   // §14.6 — Derive effective cell size from base unit and granularity.
   // cellSize prop is the base unit in CSS pixels (one physical "unit").
   // ecs is the CSS pixels per fine grid cell: baseUnitPx / cellsPerUnit.
   // At G=1: ecs = cellSize (identical to today's behaviour).
   // At G=2: ecs = cellSize/2, so 2 fine cells × ecs = cellSize (board size constant).
-  const ecs = effectiveCellSize(cellSize, classroom.cellsPerUnit);
+  // §6.B2: zoom is applied to the base unit BEFORE deriving ecs, so all
+  // derived geometry (CanvasView, DPR sizing, ghost ring) scales uniformly.
+  const ecs = effectiveCellSize(zoomedCellSize, classroom.cellsPerUnit);
 
   // ---------------------------------------------------------------------------
   // Stable refs — synced in useLayoutEffect so they're never mutated during
@@ -360,6 +390,30 @@ export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onView
     editorRef.current.onContextMenu(e.nativeEvent, ctx);
   }, [buildEventCtx]);
 
+  // §6.B2 — Scroll-wheel zoom: non-passive native listener so preventDefault works.
+  // React's synthetic onWheel is passive in React 17+ (can't call preventDefault).
+  // We attach a native listener with { passive: false } on the canvas element so
+  // the browser allows us to suppress the default scroll-page behaviour.
+  //
+  // The zoom state change triggers a re-render → re-derives ecs → re-fires
+  // onViewReady (via the ecs dep), so all derived geometry stays correct.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      setZoom((prev) => {
+        const raw = prev * (1 - e.deltaY * ZOOM_STEP);
+        return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, raw));
+      });
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => { canvas.removeEventListener('wheel', onWheel); };
+    // Only attach once on mount — onWheel captures setZoom (stable) and ZOOM_* constants.
+  }, []);
+
   // -------------------------------------------------------------------------
   // Render — initial width/height attrs; resizeCanvas overwrites with DPR values
   // -------------------------------------------------------------------------
@@ -369,9 +423,10 @@ export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onView
   const cssW = (classroom.gridW + 2 * ghostMargin) * ecs;
   const cssH = (classroom.gridH + 2 * ghostMargin) * ecs;
 
+  // §6.A4 — cursor changes when assigner mode is on (driven by the `cursor` prop).
   const canvasStyle = useMemo<React.CSSProperties>(
-    () => ({ display: 'block', cursor: 'crosshair', outline: 'none' }),
-    [],
+    () => ({ display: 'block', cursor, outline: 'none' }),
+    [cursor],
   );
 
   return (

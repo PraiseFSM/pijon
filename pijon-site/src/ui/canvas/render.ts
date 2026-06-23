@@ -40,6 +40,7 @@ import { getImage } from './imageCache.js';
 import { furnitureAssetUrl } from '../../assets/paths.js';
 import {
   gridLine,
+  gridLineSubunit,
   gridBackground,
   furnitureFillSingleDesk,
   furnitureFillTable,
@@ -110,44 +111,91 @@ export function drawBackground(
 // ---------------------------------------------------------------------------
 
 /**
- * Draw the light grid lines over the background.
+ * §6.B1 — Line-weight tiers for a given granularity G and index.
  *
- * @param ctx       canvas 2D context (already DPR-scaled by caller)
- * @param gridW     number of columns
- * @param gridH     number of rows
- * @param cellSize  CSS pixels per cell
- * @param color     optional override for the line color (defaults to gridLine token)
+ * Returns 0 (boldest/unit), 1 (half-unit), or 2 (quarter-unit).
+ *
+ * At G=1 every line is on a unit boundary → tier 0.
+ * At G=2 alternating lines: 0, 1, 0, 1, …
+ * At G=4 three tiers: 0 (unit), 1 (half-unit = every 2 cells), 2 (quarter = every cell).
+ *
+ * @param index        column or row index (0 … gridW/gridH inclusive)
+ * @param cellsPerUnit granularity G (1, 2, or 4)
+ */
+export function gridLineTier(index: number, cellsPerUnit: number): 0 | 1 | 2 {
+  if (cellsPerUnit <= 1) return 0;
+  if (index % cellsPerUnit === 0) return 0;                  // unit boundary
+  if (cellsPerUnit === 4 && index % 2 === 0) return 1;      // half-unit (G=4 only)
+  return cellsPerUnit === 2 ? 1 : 2;                        // half or quarter
+}
+
+/** §6.B1 — lineWidth per tier. */
+const TIER_LINE_WIDTH: [number, number, number] = [1.2, 0.5, 0.3];
+
+/**
+ * Draw the grid lines over the background, with a thickness hierarchy
+ * based on granularity (§6.B1).
+ *
+ * Unit-boundary lines (index % cellsPerUnit === 0) are drawn boldest.
+ * Half-unit and quarter-unit subdivision lines are progressively thinner
+ * and lighter, so the physical-unit grid stays visually prominent.
+ *
+ * At G=1 every line is a unit boundary, so all lines use the bold width —
+ * visually identical to the previous single-pass behaviour.
+ *
+ * @param ctx          canvas 2D context (already DPR-scaled by caller)
+ * @param gridW        number of columns
+ * @param gridH        number of rows
+ * @param cellSize     CSS pixels per fine grid cell
+ * @param cellsPerUnit granularity G — lines every G cells are unit boundaries
+ * @param color        optional override for the unit-boundary line color
  */
 export function drawGrid(
   ctx: CanvasRenderingContext2D,
   gridW: number,
   gridH: number,
   cellSize: number,
+  cellsPerUnit = 1,
   color?: string,
 ): void {
   const totalW = gridW * cellSize;
   const totalH = gridH * cellSize;
 
+  // Determine how many distinct tiers are actually used.
+  // G=1 → only tier 0; G=2 → tiers 0 and 1; G=4 → tiers 0, 1, and 2.
+  const maxTier = cellsPerUnit >= 4 ? 2 : cellsPerUnit >= 2 ? 1 : 0;
+
+  // Unit-boundary color (can be overridden by caller, e.g. classroom.gridColor)
+  const unitColor = color ?? gridLine;
+
   ctx.save();
-  ctx.strokeStyle = color ?? gridLine;
-  ctx.lineWidth = 0.5;
-  ctx.beginPath();
 
-  // Vertical lines
-  for (let col = 0; col <= gridW; col++) {
-    const x = col * cellSize;
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, totalH);
+  for (let tier = 0; tier <= maxTier; tier++) {
+    // Sub-unit lines use the lighter gridLineSubunit token.
+    // Tier 0 (unit boundary) always uses the main gridLine / custom color.
+    ctx.strokeStyle = tier === 0 ? unitColor : gridLineSubunit;
+    ctx.lineWidth = TIER_LINE_WIDTH[tier] ?? 0.3;
+    ctx.beginPath();
+
+    // Vertical lines for this tier
+    for (let col = 0; col <= gridW; col++) {
+      if (gridLineTier(col, cellsPerUnit) !== tier) continue;
+      const x = col * cellSize;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, totalH);
+    }
+
+    // Horizontal lines for this tier
+    for (let row = 0; row <= gridH; row++) {
+      if (gridLineTier(row, cellsPerUnit) !== tier) continue;
+      const y = row * cellSize;
+      ctx.moveTo(0, y);
+      ctx.lineTo(totalW, y);
+    }
+
+    ctx.stroke();
   }
 
-  // Horizontal lines
-  for (let row = 0; row <= gridH; row++) {
-    const y = row * cellSize;
-    ctx.moveTo(0, y);
-    ctx.lineTo(totalW, y);
-  }
-
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -366,8 +414,8 @@ export function renderBasePass(
   // 2. §14.4 Background image (opt-in; under grid lines and furniture)
   drawBackground(ctx, classroom.backgroundImage, cssW, cssH);
 
-  // 3. Grid lines
-  drawGrid(ctx, classroom.gridW, classroom.gridH, cellSize, gridColor);
+  // 3. Grid lines (§6.B1: pass cellsPerUnit for thickness hierarchy)
+  drawGrid(ctx, classroom.gridW, classroom.gridH, cellSize, classroom.cellsPerUnit, gridColor);
 
   // 4. Furniture (image or color fill per §14.3)
   drawFurniture(ctx, classroom, cellSize, locks);

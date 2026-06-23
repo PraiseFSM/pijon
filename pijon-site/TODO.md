@@ -139,6 +139,53 @@ Files: `ui/editors/StudentEditor.tsx`, new `src/test/clusterC.test.tsx`.
 > algorithm+ShowLinks in Settings), C (roster drag-to-seat). Suite: **1274 tests green**, tsc + lint
 > clean, production PWA build OK.
 
+### Iteration 6 — round-4 feedback (processed from feedback.txt, 2026-06-22)
+
+Conductor translation, bug→test→feature order; each cluster gets a builder + checker (hole-poke) pass
+with tests. Outline updated to match (Classroom building, Grid granularity, Seating, Preferences).
+
+**Cluster A — Preference UI. ✅ COMPLETE 2026-06-22.** Builder + checker; verified suite 1327 green,
+tsc + lint clean, build OK. New `ui/components/WeightSelector.tsx` (single source of truth, used by top
+bar + roster rows), assigner lever in top bar, `ASSIGNER_CURSOR` token → red cursor via
+`registerAssignerCursorListener` → App → ClassroomCanvas. No source defects; checker added 21 hardening
+tests (incl. catching a false-positive cursor test). New tests: `clusterA.test.tsx` + `clusterA_harden.test.tsx`.
+Files: `ui/editors/StudentEditor.tsx`, `ui/components/WeightSelector.tsx`, `theme/colors.ts`, `ui/App.tsx`,
+`ui/canvas/ClassroomCanvas.tsx`.
+- [x] **6.A1 Extract a single shared `WeightSelector` component** ({−2,−1,+1,+2}, shows the active
+  value, calls back on change). *Method:* one component, used by BOTH the top-bar selector AND each
+  roster preference row — single source of truth so the four buttons always look identical and a future
+  icon change updates everywhere. Replace the inline top-bar buttons with it (keep `weight-btn-*` testids
+  or migrate tests). Tests + checker.
+- [x] **6.A2 Redesigned roster student menu** — name + one row per linked student (`name | WeightSelector |
+  ✕`), add-student control (excludes self/linked/fixtures, adds at current weight); no assigner toggle.
+- [x] **6.A3 Assigner toggle moved to top bar** (`assigner-toggle-lever`), same section as the weight selector.
+- [x] **6.A4 Assigner cursor** — `ASSIGNER_CURSOR` token (url() + fallback, swap-ready), applied by ClassroomCanvas.
+
+**Cluster B — Canvas display. ✅ COMPLETE 2026-06-22.** Builder + checker; verified suite 1384 green, tsc +
+lint clean, build OK. No source defects; checker added 13 hardening tests. New tests: `clusterB_canvas.test.ts`,
+`clusterB_zoom.test.tsx`. Files: `ui/canvas/render.ts`, `theme/colors.ts`, `ui/canvas/ClassroomCanvas.tsx`.
+- [x] **6.B1 Grid-line thickness hierarchy.** `drawGrid(…, cellsPerUnit)` + `gridLineTier`; unit-boundary
+  lines boldest (1.2), half-unit 0.5, quarter-unit 0.3; new `gridLineSubunit` token; positions unchanged across G.
+- [x] **6.B2 Scroll-wheel zoom.** Native passive:false wheel listener; clamped zoom 0.4×–3× scales the base
+  unit px only (cellsPerUnit/units/furniture unchanged); CanvasView geometry + DPR + onViewReady consistent; cursor preserved.
+
+**Cluster C — Granularity-decrease ghost-fix. ✅ COMPLETE 2026-06-22.** Builder + checker; verified suite
+1441 green, tsc + lint clean, build OK. No source defects; checker added 6 hardening tests (incl. the
+critical re-click-with-conflicts guard + bounds-clamp). New tests: `domain/granularityConflicts.test.ts`,
+`clusterC_granFix.test.tsx`, `clusterC.test.tsx`. Files: `domain/classroom.ts`, `ui/editors/FurnitureEditor.tsx`,
+`theme/colors.ts` (granFix tokens).
+- [x] **6.C1 `granularityConflicts(c, newG)`** — pure helper; each off-boundary piece + nearest valid `to`
+  (snapped to `step = oldG/newG`, clamped in-bounds, near-neighbour collision avoidance). Returns [] for
+  increase / already-aligned.
+- [x] **6.C2 Ghost-fix overlay + lifecycle.** Blocked decrease → fix mode: red highlight + translucent ghost
+  + arrow per conflict; banner instructs the move; live-recomputed each paint (resolves/re-targets as pieces
+  move); re-clicking the target G applies only when conflicts hit zero, then exits; activate/deactivate clears state.
+
+> **Iteration 6 COMPLETE (2026-06-22).** All three clusters shipped with builder + checker passes:
+> A (shared WeightSelector reused in top bar + roster rows, roster menu redesign, assigner lever in top
+> bar, red assigner cursor), B (granularity grid-line thickness hierarchy, scroll-wheel zoom), C (granularity
+> ghost-fix overlay). Suite: **1441 tests green**, tsc + lint clean, production PWA build OK.
+
 ## Deferred tests (write later)
 
 Tests were paused to conserve usage. Code below was shipped WITHOUT tests and needs an

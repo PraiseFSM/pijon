@@ -401,6 +401,129 @@ export function setGranularity(c: Classroom, newG: number): Classroom {
 }
 
 // ---------------------------------------------------------------------------
+// granularityConflicts — find furniture that can't scale cleanly to newG
+// ---------------------------------------------------------------------------
+
+/**
+ * A conflict record: one piece of furniture whose position cannot scale cleanly
+ * to `newG`, together with the nearest valid position the teacher could move it to.
+ */
+export interface GranularityConflict {
+  /** Id of the offending furniture piece. */
+  readonly id: FurnitureId;
+  /** Current position (in fine cells at the current granularity). */
+  readonly from: Vec2;
+  /** Nearest valid position: on a coarse-unit boundary, in-bounds, ideally non-colliding. */
+  readonly to: Vec2;
+}
+
+/**
+ * 6.C1 — Return every piece of furniture that would block a granularity decrease
+ * from `c.cellsPerUnit` (oldG) to `newG`, together with the nearest valid
+ * position the teacher could move each piece to.
+ *
+ * A value v at granularity oldG scales to newG via `v * newG / oldG`. The result
+ * must be an integer, which is equivalent to requiring `v % step === 0` where
+ * `step = oldG / newG`. (Since {1,2,4} are the only supported values and newG < oldG,
+ * `step` is always a positive integer: 2→1 gives step=2, 4→2 gives step=2, 4→1 gives step=4.)
+ *
+ * Furniture `w` and `h` are always multiples of `cellsPerUnit` (they were placed
+ * via makeFurniture which multiplies unit-dims by G) so only `pos.x` and `pos.y`
+ * can fail the divisibility test.
+ *
+ * Nearest valid position:
+ *   1. Snap: round x and y independently to the nearest multiple of `step`.
+ *   2. Clamp: keep the piece in-bounds (0 ≤ x ≤ gridW-w, 0 ≤ y ≤ gridH-h).
+ *   3. Collision avoidance: search a small neighbourhood of step-aligned positions
+ *      (within ±2 steps in each axis) for one that doesn't overlap OTHER furniture;
+ *      if none found, return the snapped/clamped position anyway.
+ *
+ * Returns an empty array when newG ≥ oldG (increase or no-change) or when all
+ * pieces are already on coarse-unit boundaries. Pure, no DOM.
+ */
+export function granularityConflicts(
+  c: Classroom,
+  newG: number,
+): readonly GranularityConflict[] {
+  const oldG = c.cellsPerUnit;
+  // Only decreases can block; increases always work.
+  if (newG >= oldG) return [];
+
+  const step = oldG / newG; // always a positive integer for {1,2,4} transitions
+
+  /** True when pos.x and pos.y are both multiples of step. */
+  function isAligned(pos: Vec2): boolean {
+    return pos.x % step === 0 && pos.y % step === 0;
+  }
+
+  /** True when a w×h piece at pos fits within the grid. */
+  function fitsBounds(pos: Vec2, w: number, h: number): boolean {
+    return pos.x >= 0 && pos.y >= 0 && pos.x + w <= c.gridW && pos.y + h <= c.gridH;
+  }
+
+  /**
+   * True when a w×h piece at pos collides with any other furniture (excludes
+   * the piece with `excludeId` — it is being moved/evaluated).
+   */
+  function collides(pos: Vec2, w: number, h: number, excludeId: FurnitureId): boolean {
+    for (const other of c.furniture) {
+      if (other.id === excludeId) continue;
+      // AABB overlap test
+      const overlapX = pos.x < other.pos.x + other.w && pos.x + w > other.pos.x;
+      const overlapY = pos.y < other.pos.y + other.h && pos.y + h > other.pos.y;
+      if (overlapX && overlapY) return true;
+    }
+    return false;
+  }
+
+  /** Snap a coordinate to the nearest multiple of step, then clamp to [0, max]. */
+  function snapClamp(v: number, max: number): number {
+    const snapped = Math.round(v / step) * step;
+    return Math.max(0, Math.min(max, snapped));
+  }
+
+  const conflicts: GranularityConflict[] = [];
+
+  for (const f of c.furniture) {
+    if (isAligned(f.pos)) continue; // already valid
+
+    // Snap + clamp the base candidate
+    const maxX = c.gridW - f.w;
+    const maxY = c.gridH - f.h;
+    const baseX = snapClamp(f.pos.x, maxX);
+    const baseY = snapClamp(f.pos.y, maxY);
+
+    // Collision avoidance: try a small neighbourhood (±2 steps in each axis,
+    // ordered by Manhattan distance from the snapped position).
+    const candidates: { x: number; y: number; dist: number }[] = [];
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        const cx = baseX + dx * step;
+        const cy = baseY + dy * step;
+        if (!fitsBounds({ x: cx, y: cy }, f.w, f.h)) continue;
+        const dist = Math.abs(dx) + Math.abs(dy);
+        candidates.push({ x: cx, y: cy, dist });
+      }
+    }
+    // Sort by Manhattan distance so we prefer nearest alternatives
+    candidates.sort((a, b) => a.dist - b.dist);
+
+    // Find the nearest non-colliding candidate; fall back to snapped/clamped
+    let to: Vec2 = { x: baseX, y: baseY };
+    for (const cand of candidates) {
+      if (!collides({ x: cand.x, y: cand.y }, f.w, f.h, f.id)) {
+        to = { x: cand.x, y: cand.y };
+        break;
+      }
+    }
+
+    conflicts.push({ id: f.id, from: f.pos, to });
+  }
+
+  return conflicts;
+}
+
+// ---------------------------------------------------------------------------
 // setThreshold — change the proximity threshold in units
 // ---------------------------------------------------------------------------
 

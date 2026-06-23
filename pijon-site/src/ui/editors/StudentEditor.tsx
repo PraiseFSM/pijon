@@ -32,9 +32,6 @@ import {
   primaryButtonBackground,
   primaryButtonBorder,
   primaryButtonText,
-  activeButtonBackground,
-  activeButtonBorder,
-  activeButtonText,
   btnBackground,
   btnBorder,
   disabledButtonBackground,
@@ -99,6 +96,7 @@ import {
   prefLinkPrefer,
   prefLinkAvoid,
 } from '../../theme/colors.js';
+import { WeightSelector } from '../components/WeightSelector.js';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureId, StudentId } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
@@ -335,6 +333,27 @@ let closeContextMenuCallback: (() => void) | null = null;
  * the React component (so the canvas event handlers can read the current value).
  */
 let setAssignerModeCallback: ((on: boolean) => void) | null = null;
+
+/**
+ * §6.A4 — Callback registered by App.tsx so ClassroomCanvas receives the correct
+ * cursor when assigner mode toggles. The shell calls registerAssignerCursorListener
+ * to subscribe; the listener is called with `true` (assigner on) or `false` (off).
+ * A single listener is sufficient — only one App renders at a time.
+ */
+let assignerCursorListener: ((on: boolean) => void) | null = null;
+
+/**
+ * Register a listener for assigner-mode on/off transitions.
+ * Called by App.tsx once on mount. Returns an unregister function.
+ */
+export function registerAssignerCursorListener(cb: (on: boolean) => void): () => void {
+  assignerCursorListener = cb;
+  return () => {
+    if (assignerCursorListener === cb) {
+      assignerCursorListener = null;
+    }
+  };
+}
 
 // ---------------------------------------------------------------------------
 // SeatGraph cache helpers
@@ -731,19 +750,79 @@ const AssignerHint: React.FC = () => {
   );
 };
 
-// ---------------------------------------------------------------------------
-// §5.B3 — Weight selector: four fixed options in the toolbar
-// ---------------------------------------------------------------------------
-
-/** The four fixed preference weight options. */
-const WEIGHT_OPTIONS: { value: number; label: string }[] = [
-  { value: -2, label: '−2' },
-  { value: -1, label: '−1' },
-  { value: 1, label: '+1' },
-  { value: 2, label: '+2' },
-];
-
+// (WEIGHT_OPTIONS moved to WeightSelector.tsx as WEIGHT_OPTIONS export — §6.A1)
 // (SplitButton removed in §5.B4 — algorithm + variant moved to SettingsMenu; toolbar shows single Allocate button)
+
+// ---------------------------------------------------------------------------
+// §6.A3 — AssignerToggleLever: a clear on/off toggle lever for assigner mode
+// Rendered in the top bar in the same section as the weight selector.
+// ---------------------------------------------------------------------------
+
+/**
+ * Toggle lever for assigner mode. Styled clearly with ON/OFF states:
+ * - OFF: neutral button with label
+ * - ON : filled amber/orange button to signal the mode is active
+ */
+const AssignerToggleLever: React.FC<{ on: boolean; onToggle: () => void }> = ({ on, onToggle }) => {
+  return (
+    <button
+      type="button"
+      data-testid="assigner-toggle-lever"
+      aria-pressed={on}
+      onClick={onToggle}
+      title={
+        on
+          ? 'Assigner mode ON — click two students on the canvas to link them. ESC to cancel.'
+          : 'Enable assigner mode to link students by clicking them on the canvas'
+      }
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: '3px 10px',
+        borderRadius: 4,
+        border: `1px solid ${on ? assignerHintBackground : btnBorder}`,
+        background: on ? assignerHintBackground : btnBackground,
+        color: on ? assignerHintText : textDark,
+        cursor: 'pointer',
+        fontSize: '0.82rem',
+        fontWeight: on ? 700 : 400,
+        whiteSpace: 'nowrap',
+        transition: 'background 0.12s, color 0.12s',
+      }}
+    >
+      {/* Lever track + knob for obvious ON/OFF visual */}
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'inline-block',
+          width: 28,
+          height: 14,
+          borderRadius: 7,
+          background: on ? assignerHintText : '#ccc',
+          position: 'relative',
+          transition: 'background 0.12s',
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            display: 'block',
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            background: on ? assignerHintBackground : '#888',
+            position: 'absolute',
+            top: 2,
+            left: on ? 16 : 2,
+            transition: 'left 0.12s, background 0.12s',
+          }}
+        />
+      </span>
+      {on ? 'Assigner ON' : 'Assigner'}
+    </button>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // §13.8 — SeatingIssuesBanner
@@ -849,8 +928,11 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   // §5.B4: showLinks owned by toolbar, passed into SettingsMenu + drives canvas via module var.
   const [showLinksState, setShowLinksState] = useState(false);
 
-  // §5.B3: track active weight in local state so aria-pressed re-renders correctly.
+  // §5.B3/6.A1: track active weight in local state so aria-pressed re-renders correctly.
   const [activeWeight, setActiveWeight] = useState(currentWeight);
+
+  // §6.A3 — Assigner toggle lever: moved here from SidePanel.
+  const [assignerOn, setAssignerOn] = useState(false);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsAnchorRef = useRef<HTMLDivElement>(null);
@@ -860,6 +942,33 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     showLinks = showLinksState;
     ctx.canvas.requestRepaint();
   }, [showLinksState, ctx.canvas]);
+
+  // §6.A3 — Keep module-level assignerModeActive in sync with toolbar assigner toggle.
+  // Mirrors the effect that was in StudentRosterPanel; moved here for §6.A3.
+  useEffect(() => {
+    assignerModeActive = assignerOn;
+    if (!assignerOn) {
+      markerFirstFid = null;
+      markerFirstStudent = null;
+      stopPulseLoop();
+      if (setAssignerFirstStudentCallback !== null) {
+        setAssignerFirstStudentCallback(null);
+      }
+    }
+    // §6.A4 — notify App so ClassroomCanvas cursor updates
+    if (assignerCursorListener !== null) {
+      assignerCursorListener(assignerOn);
+    }
+    ctx.canvas.requestRepaint();
+  }, [assignerOn, ctx.canvas]);
+
+  // §6.A3 — Register setAssignerModeCallback so deactivate() can reset the toolbar toggle.
+  useEffect(() => {
+    setAssignerModeCallback = setAssignerOn;
+    return () => {
+      setAssignerModeCallback = null;
+    };
+  }, []);
 
   const canUndo = ctx.store.historyPtr > 0;
   const canRedo = ctx.store.historyPtr < ctx.store.history.length - 1;
@@ -1013,39 +1122,24 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 
         <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
 
-        {/* §5.B3 — Weight selector: four fixed options, aria-pressed for active */}
-        {WEIGHT_OPTIONS.map(({ value, label }) => {
-          const isActive = activeWeight === value;
-          return (
-            <button
-              key={value}
-              type="button"
-              data-testid={`weight-btn-${value.toString()}`}
-              aria-pressed={isActive}
-              title={`Set preference weight to ${value > 0 ? '+' : ''}${value.toString()}`}
-              onClick={() => {
-                currentWeight = value;
-                setActiveWeight(value);
-                // Also push into SidePanel for its weight display
-                if (setCurrentWeightCallback !== null) {
-                  setCurrentWeightCallback(value);
-                }
-              }}
-              style={{
-                padding: '3px 8px',
-                borderRadius: 4,
-                border: `1px solid ${isActive ? activeButtonBorder : btnBorder}`,
-                background: isActive ? activeButtonBackground : btnBackground,
-                color: isActive ? activeButtonText : textDark,
-                cursor: 'pointer',
-                fontSize: '0.82rem',
-                fontWeight: isActive ? 700 : 400,
-              }}
-            >
-              {label}
-            </button>
-          );
-        })}
+        {/* §6.A1/5.B3 — Weight selector: shared WeightSelector component */}
+        <WeightSelector
+          value={activeWeight}
+          onChange={(w) => {
+            currentWeight = w;
+            setActiveWeight(w);
+            // Also push into SidePanel for its weight display (legacy sync)
+            if (setCurrentWeightCallback !== null) {
+              setCurrentWeightCallback(w);
+            }
+          }}
+        />
+
+        {/* §6.A3 — Assigner-mode toggle lever (same section as weight selector) */}
+        <AssignerToggleLever
+          on={assignerOn}
+          onToggle={() => { setAssignerOn((prev) => !prev); }}
+        />
 
         <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
 
@@ -1103,16 +1197,285 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 // SidePanel — roster panel (left panel)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// §6.A2 — PrefDetailPanel: inline preference detail beneath a selected student
+// ---------------------------------------------------------------------------
+
 /**
- * §5.B1 — Roster panel with inline preference detail + assigner toggle.
+ * Renders the expanded preference detail beneath a selected roster student.
+ * Shows: student name, one row per existing preference (name | WeightSelector | ✕),
+ * and a control to add a new student to their prefs.
+ * NO assigner toggle (that lives in the toolbar per §6.A3).
+ */
+const PrefDetailPanel: React.FC<{
+  student: Student;
+  roster: readonly Student[];
+  nameMap: Map<StudentId, string>;
+  displayWeight: number;
+  ctx: EditorContext;
+  onRemovePref: (pref: Preference) => void;
+}> = ({ student, roster, nameMap, displayWeight, ctx, onRemovePref }) => {
+  // Local state for the "add another student" control
+  const [addTargetId, setAddTargetId] = useState<string>('');
+
+  // Compute students not already linked and not self
+  const linkedIds = new Set<string>(
+    student.preferences.filter((p) => p.kind === 'student').map((p) => p.targetId),
+  );
+  const addableStudents = roster.filter(
+    (r) => !r.isFixture && r.id !== student.id && !linkedIds.has(r.id),
+  );
+
+  const handleAddPref = useCallback(() => {
+    if (addTargetId === '') return;
+    ctx.store.setMutualPreference(
+      student.id,
+      addTargetId as StudentId,
+      currentWeight,
+    );
+    ctx.canvas.requestRepaint();
+    setAddTargetId('');
+  }, [addTargetId, ctx, student.id]);
+
+  const studentOnlyPrefs = student.preferences.filter((p) => p.kind === 'student');
+  const otherPrefs = student.preferences.filter((p) => p.kind !== 'student');
+
+  return (
+    <div
+      data-testid="student-pref-detail"
+      style={{
+        background: selectedStudentHeaderBackground,
+        borderLeft: `3px solid ${rosterSelectedBorder}`,
+        borderBottom: `1px solid ${dividerLight}`,
+        padding: '6px 8px',
+      }}
+    >
+      {/* Student name heading */}
+      <div
+        style={{
+          fontSize: '0.72rem',
+          fontWeight: 700,
+          color: rosterSelectedBorder,
+          marginBottom: 4,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {student.name}
+      </div>
+
+      {/* Student-kind preference rows: name | WeightSelector | ✕ */}
+      {studentOnlyPrefs.length === 0 && otherPrefs.length === 0 ? (
+        <div style={{ fontSize: '0.7rem', color: textDisabled, fontStyle: 'italic', marginBottom: 4 }}>
+          No preferences yet. Use Assigner or drag.
+        </div>
+      ) : (
+        <>
+          {studentOnlyPrefs.map((pref, idx) => {
+            const targetName = nameMap.get(pref.targetId) ?? pref.targetId;
+            return (
+              <div
+                key={`sp-${idx.toString()}`}
+                data-testid={`pref-row-${idx.toString()}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  padding: '2px 0',
+                  borderBottom: `1px solid ${dividerLight}`,
+                  fontSize: '0.7rem',
+                }}
+              >
+                {/* Target student name */}
+                <span
+                  style={{
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: textDark,
+                    minWidth: 0,
+                  }}
+                  title={targetName}
+                >
+                  {targetName}
+                </span>
+
+                {/* Weight selector — compact variant; changes update mutual pref */}
+                <WeightSelector
+                  value={pref.weight}
+                  onChange={(w) => {
+                    ctx.store.setMutualPreference(student.id, pref.targetId, w);
+                    ctx.canvas.requestRepaint();
+                  }}
+                  testIdPrefix={`pref-row-${idx.toString()}-`}
+                  compact
+                />
+
+                {/* ✕ remove */}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onRemovePref(pref); }}
+                  style={{
+                    flexShrink: 0,
+                    padding: '1px 4px',
+                    fontSize: '0.65rem',
+                    border: `1px solid ${dangerButtonBorder}`,
+                    borderRadius: 3,
+                    background: dangerButtonBackground,
+                    color: dangerButtonText,
+                    cursor: 'pointer',
+                  }}
+                  title="Remove this preference"
+                  data-testid={`pref-row-${idx.toString()}-remove`}
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+
+          {/* Non-student prefs (furniture / location): show read-only with just ✕ */}
+          {otherPrefs.map((pref, idx) => {
+            let targetLabel: string;
+            if (pref.kind === 'furniture') {
+              targetLabel = `Desk: ${pref.targetId}`;
+            } else {
+              targetLabel = `Loc: ${pref.target}`;
+            }
+            const dirColor = pref.weight > 0 ? prefPreferText : prefAvoidText;
+            return (
+              <div
+                key={`op-${idx.toString()}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  padding: '2px 0',
+                  borderBottom: `1px solid ${dividerLight}`,
+                  fontSize: '0.7rem',
+                }}
+              >
+                <span style={{ color: dirColor, flexShrink: 0, fontWeight: 700 }}>
+                  {pref.weight > 0 ? '+' : ''}
+                  {pref.weight.toFixed(0)}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: textMuted,
+                  }}
+                >
+                  {targetLabel}
+                </span>
+                {pref.kind !== 'location' && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onRemovePref(pref); }}
+                    style={{
+                      flexShrink: 0,
+                      padding: '1px 4px',
+                      fontSize: '0.65rem',
+                      border: `1px solid ${dangerButtonBorder}`,
+                      borderRadius: 3,
+                      background: dangerButtonBackground,
+                      color: dangerButtonText,
+                      cursor: 'pointer',
+                    }}
+                    title="Remove this preference"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* Add another student to prefs — current weight from toolbar is used */}
+      {addableStudents.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 3,
+            marginTop: 5,
+            alignItems: 'center',
+          }}
+        >
+          <select
+            value={addTargetId}
+            onChange={(e) => { setAddTargetId(e.target.value); }}
+            data-testid="add-pref-select"
+            style={{
+              flex: 1,
+              fontSize: '0.7rem',
+              padding: '2px 3px',
+              borderRadius: 3,
+              border: `1px solid ${btnBorder}`,
+              minWidth: 0,
+            }}
+            aria-label="Add preference for student"
+          >
+            <option value="">+ Add student…</option>
+            {addableStudents.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleAddPref}
+            disabled={addTargetId === ''}
+            data-testid="add-pref-btn"
+            style={{
+              flexShrink: 0,
+              padding: '2px 6px',
+              fontSize: '0.7rem',
+              borderRadius: 3,
+              border: `1px solid ${addStudentButtonBorder}`,
+              background: addTargetId === '' ? disabledButtonBackground : addStudentButtonBackground,
+              color: addStudentButtonText,
+              cursor: addTargetId === '' ? 'default' : 'pointer',
+              fontWeight: 600,
+            }}
+            aria-label="Add preference"
+          >
+            Add
+          </button>
+        </div>
+      )}
+
+      {/* Show current weight from toolbar as a hint */}
+      <div style={{ marginTop: 4, fontSize: '0.68rem', color: textMuted }}>
+        Next weight: <span style={{ fontWeight: 700, color: displayWeight < 0 ? prefAvoidText : prefPreferText }}>
+          {displayWeight > 0 ? '+' : ''}{displayWeight.toFixed(1)}
+        </span>
+        <span style={{ marginLeft: 3, color: textDisabled }}>(set in toolbar)</span>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// §6.A2 — Roster panel with redesigned inline preference detail.
+// ---------------------------------------------------------------------------
+
+/**
+ * §6.A2 — Roster panel with redesigned inline preference detail.
  * Order (top to bottom):
  *   1. Header
  *   2. Student count badge
- *   3. Manual add-student form
- *   4. Scrollable student list: each student row, and when selected: assigner toggle + pref list
+ *   3. Scrollable student list: each student row; when selected: name + pref rows + add control
+ *   4. Manual add-student form — just above Import CSV
  *   5. Import CSV (bottom-most control)
  *
- * Also owns: assigner mode state, currentWeight sync (via setCurrentWeightCallback).
+ * The assigner toggle has moved to StudentToolbar (§6.A3).
  */
 const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const roster = ctx.store.roster;
@@ -1122,33 +1485,9 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   const [importStatus, setImportStatus] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // §5.B1 — Assigner mode state lives here (moved from RightPanel)
-  const [assignerOn, setAssignerOn] = useState(false);
-
   // §5.B3 — weight display state: tracks currentWeight for aria-pressed rendering
+  // (kept for the "current weight" display; no longer drives an assigner toggle)
   const [displayWeight, setDisplayWeight] = useState(currentWeight);
-
-  // Keep module-level assignerModeActive in sync
-  useEffect(() => {
-    assignerModeActive = assignerOn;
-    if (!assignerOn) {
-      markerFirstFid = null;
-      markerFirstStudent = null;
-      stopPulseLoop();
-      if (setAssignerFirstStudentCallback !== null) {
-        setAssignerFirstStudentCallback(null);
-      }
-    }
-    ctx.canvas.requestRepaint();
-  }, [assignerOn, ctx.canvas]);
-
-  // Register setAssignerModeCallback so deactivate() can reset assigner mode
-  useEffect(() => {
-    setAssignerModeCallback = setAssignerOn;
-    return () => {
-      setAssignerModeCallback = null;
-    };
-  }, []);
 
   // §5.B3 — Register setCurrentWeightCallback so toolbar weight buttons update this component
   useEffect(() => {
@@ -1252,8 +1591,8 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   return (
     <div
       style={{
-        width: 180,
-        minWidth: 160,
+        width: 220,
+        minWidth: 200,
         display: 'flex',
         flexDirection: 'column',
         background: sidePanelBackground,
@@ -1368,116 +1707,16 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
                 </button>
               </div>
 
-              {/* §5.B1 — Inline preference detail + assigner toggle (shown when student is selected) */}
+              {/* §6.A2 — Redesigned inline preference detail (no assigner toggle here) */}
               {isSelected && (
-                <div
-                  data-testid="student-pref-detail"
-                  style={{
-                    background: selectedStudentHeaderBackground,
-                    borderLeft: `3px solid ${rosterSelectedBorder}`,
-                    borderBottom: `1px solid ${dividerLight}`,
-                    padding: '6px 8px',
-                  }}
-                >
-                  {/* Assigner mode toggle */}
-                  <button
-                    type="button"
-                    onClick={() => { setAssignerOn((prev) => !prev); }}
-                    style={{
-                      width: '100%',
-                      padding: '3px 8px',
-                      marginBottom: 4,
-                      borderRadius: 4,
-                      borderWidth: 1,
-                      borderStyle: 'solid',
-                      borderColor: assignerOn ? assignerHintBackground : btnBorder,
-                      background: assignerOn ? assignerHintBackground : btnBackground,
-                      color: assignerOn ? assignerHintText : textDark,
-                      cursor: 'pointer',
-                      fontSize: '0.76rem',
-                      fontWeight: 600,
-                      textAlign: 'left',
-                    }}
-                    title={assignerOn ? 'Assigner mode ON — click two students on the canvas to link them. ESC to cancel.' : 'Enable assigner mode to link students by clicking them on the canvas'}
-                  >
-                    {assignerOn ? '🖱 Assigner ON' : 'Enable Assigner'}
-                  </button>
-
-                  {/* Preference list header */}
-                  <div style={{ fontSize: '0.7rem', color: textMuted, fontWeight: 700, marginBottom: 2 }}>
-                    {s.name} — preferences
-                  </div>
-
-                  {s.preferences.length === 0 ? (
-                    <div style={{ fontSize: '0.7rem', color: textDisabled, fontStyle: 'italic' }}>
-                      None. Use Assigner or drag between desks.
-                    </div>
-                  ) : (
-                    s.preferences.map((pref, idx) => {
-                      let targetLabel: string;
-                      if (pref.kind === 'student') {
-                        targetLabel = nameMap.get(pref.targetId) ?? pref.targetId;
-                      } else if (pref.kind === 'furniture') {
-                        targetLabel = `Desk: ${pref.targetId}`;
-                      } else {
-                        targetLabel = `Location: ${pref.target}`;
-                      }
-                      const dirLabel = pref.weight > 0 ? '↑ Prefer' : '↓ Avoid';
-                      const dirColor = pref.weight > 0 ? prefPreferText : prefAvoidText;
-                      return (
-                        <div
-                          // eslint-disable-next-line react/no-array-index-key
-                          key={idx}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            fontSize: '0.72rem',
-                            padding: '2px 0',
-                            borderBottom: `1px solid ${prefCountBadgeBackground}`,
-                          }}
-                        >
-                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <span style={{ color: dirColor, fontWeight: 700 }}>{dirLabel}</span>
-                            {' '}
-                            {targetLabel}
-                            <span style={{ color: textDisabled, marginLeft: 3 }}>
-                              ({pref.weight > 0 ? '+' : ''}{pref.weight.toFixed(1)})
-                            </span>
-                          </span>
-                          {pref.kind !== 'location' && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleRemovePref(pref); }}
-                              style={{
-                                flexShrink: 0,
-                                marginLeft: 4,
-                                padding: '1px 4px',
-                                fontSize: '0.65rem',
-                                border: `1px solid ${dangerButtonBorder}`,
-                                borderRadius: 3,
-                                background: dangerButtonBackground,
-                                color: dangerButtonText,
-                                cursor: 'pointer',
-                              }}
-                              title="Remove this preference"
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-
-                  {/* Current weight display */}
-                  <div style={{ marginTop: 4, fontSize: '0.7rem', color: textMuted }}>
-                    Weight: <span style={{ fontWeight: 700 }}>{displayWeight > 0 ? '+' : ''}{displayWeight.toFixed(1)}</span>
-                    <span style={{ marginLeft: 4, color: displayWeight < 0 ? prefAvoidText : prefPreferText }}>
-                      ({displayWeight < 0 ? 'Avoid' : 'Prefer'})
-                    </span>
-                  </div>
-                </div>
+                <PrefDetailPanel
+                  student={s}
+                  roster={roster}
+                  nameMap={nameMap}
+                  displayWeight={displayWeight}
+                  ctx={ctx}
+                  onRemovePref={handleRemovePref}
+                />
               )}
             </div>
           );

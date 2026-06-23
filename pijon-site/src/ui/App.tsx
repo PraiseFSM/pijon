@@ -41,6 +41,7 @@ import {
   canvasCardBackground,
   canvasCardBorder,
   canvasCardShadow,
+  ASSIGNER_CURSOR,
 } from '../theme/colors.js';
 import { usePijonStore } from '../state/store.js';
 import { initPersistence, type PersistenceHandle } from '../state/persistence.js';
@@ -52,6 +53,7 @@ import { EditorSwitcher } from './shell/EditorSwitcher.js';
 import { TopBar } from './shell/TopBar.js';
 import { SidePanel } from './shell/SidePanel.js';
 import { RightPanel } from './shell/RightPanel.js';
+import { registerAssignerCursorListener } from './editors/StudentEditor.js';
 
 // ---------------------------------------------------------------------------
 // Minimal no-op CanvasView — used before the canvas mounts and fires onViewReady.
@@ -118,6 +120,21 @@ export default function App() {
     EDITOR_REGISTRY.find((e) => e.id === activeEditorId) ??
     EDITOR_REGISTRY[0] ??
     NoopEditor;
+
+  // ---- §6.A4 — Assigner cursor -----------------------------------------------
+  // Register a listener so StudentEditor can notify App when assigner mode
+  // toggles. App lifts this into state so ClassroomCanvas re-renders with the
+  // correct CSS cursor value (ASSIGNER_CURSOR vs default 'crosshair').
+  const [assignerActive, setAssignerActive] = useState(false);
+
+  useEffect(() => {
+    const unregister = registerAssignerCursorListener(setAssignerActive);
+    // Reset cursor on unmount (edge case: SSR / test teardown)
+    return () => {
+      setAssignerActive(false);
+      unregister();
+    };
+  }, []);
 
   // ---- CanvasView from ClassroomCanvas --------------------------------------
   // ClassroomCanvas fires onViewReady whenever the canvas is ready / resized.
@@ -207,6 +224,7 @@ export default function App() {
               cellSize={48}
               ghostMargin={activeEditor.id === 'furniture' ? store.classroom.cellsPerUnit : 0}
               onViewReady={handleViewReady}
+              cursor={assignerActive ? ASSIGNER_CURSOR : 'crosshair'}
             />
           </div>
         </div>

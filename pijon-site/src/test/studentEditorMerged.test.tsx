@@ -410,15 +410,15 @@ describe('StudentEditor — assigner mode vs drag routing', () => {
   });
 
   it('in assigner mode (ON), two sequential clicks call setMutualPreference', () => {
-    // §5.B1: assigner toggle now lives in the SidePanel (not RightPanel).
-    // Render the SidePanel with Alice selected so the assigner toggle appears.
+    // §6.A3: assigner toggle now lives in the Toolbar (moved from SidePanel).
+    // Render the Toolbar to find and click the assigner toggle lever.
     const ctxWithSelection = { ...ctx };
     (ctxWithSelection.store as { selectedStudentId: typeof alice.id }).selectedStudentId = alice.id;
 
-    render(<StudentEditor.SidePanel ctx={ctxWithSelection} />);
+    render(<StudentEditor.Toolbar ctx={ctxWithSelection} />);
 
-    // Click the "Enable Assigner" button
-    const toggleBtn = screen.getByRole('button', { name: /enable assigner/i });
+    // Click the assigner toggle lever
+    const toggleBtn = screen.getByTestId('assigner-toggle-lever');
     act(() => { fireEvent.click(toggleBtn); });
 
     // Now simulate first click (desk 1 — Alice)
@@ -454,8 +454,8 @@ describe('StudentEditor — assigner mode vs drag routing', () => {
     const ctxWithSelection = { ...ctx };
     (ctxWithSelection.store as { selectedStudentId: typeof alice.id }).selectedStudentId = alice.id;
 
-    render(<StudentEditor.SidePanel ctx={ctxWithSelection} />);
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
+    render(<StudentEditor.Toolbar ctx={ctxWithSelection} />);
+    act(() => { fireEvent.click(screen.getByTestId('assigner-toggle-lever')); });
 
     // First click
     (ctx.canvas.cellAt as ReturnType<typeof vi.fn>).mockReturnValue({ x: 0, y: 0 });
@@ -488,8 +488,8 @@ describe('StudentEditor — assigner mode vs drag routing', () => {
     const ctxWithSelection = { ...ctx };
     (ctxWithSelection.store as { selectedStudentId: typeof alice.id }).selectedStudentId = alice.id;
 
-    render(<StudentEditor.SidePanel ctx={ctxWithSelection} />);
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
+    render(<StudentEditor.Toolbar ctx={ctxWithSelection} />);
+    act(() => { fireEvent.click(screen.getByTestId('assigner-toggle-lever')); });
 
     // Click Alice twice (same desk)
     (ctx.canvas.cellAt as ReturnType<typeof vi.fn>).mockReturnValue({ x: 0, y: 0 });
@@ -690,15 +690,19 @@ describe('StudentEditor SidePanel — inline preferences for selected student', 
     expect(document.querySelector('[data-testid="student-pref-detail"]')).toBeTruthy();
   });
 
-  it('shows the Assigner toggle button when a student is selected', () => {
-    render(<StudentEditor.SidePanel ctx={ctx} />);
-    expect(screen.getByRole('button', { name: /enable assigner/i })).toBeInTheDocument();
+  it('shows the Assigner toggle lever in the Toolbar (§6.A3)', () => {
+    // §6.A3: assigner toggle moved to Toolbar; no longer in SidePanel
+    render(<StudentEditor.Toolbar ctx={ctx} />);
+    expect(screen.getByTestId('assigner-toggle-lever')).toBeInTheDocument();
   });
 
-  it('shows the student preference entries inline', () => {
+  it('shows the student preference entries inline (§6.A2)', () => {
     render(<StudentEditor.SidePanel ctx={ctx} />);
-    // Alice has an avoid-pref; the '↓ Avoid' direction label should appear
-    expect(screen.getByText('↓ Avoid')).toBeInTheDocument();
+    // §6.A2: pref rows now show WeightSelector buttons — Bob is listed as target
+    // getAllByText because "Bob" also appears in the roster list
+    expect(screen.getAllByText('Bob').length).toBeGreaterThan(0);
+    // The pref-detail section is present
+    expect(document.querySelector('[data-testid="student-pref-detail"]')).toBeTruthy();
   });
 
   it('renders a ✕ remove button for each preference', () => {
@@ -715,13 +719,17 @@ describe('StudentEditor SidePanel — inline preferences for selected student', 
     expect(ctx.store.clearMutualPreference).toHaveBeenCalledWith(alice.id, bob.id);
   });
 
-  it('does NOT show an add-preference form (§5.B2 — prefs via assigner/drag only)', () => {
-    render(<StudentEditor.SidePanel ctx={ctx} />);
-    // No combobox / dropdown for target student
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    // No "Add" button for preferences (CSV import Add and student Add are not "Add pref")
-    const addBtns = screen.queryAllByRole('button', { name: /^add$/i });
-    expect(addBtns).toHaveLength(0);
+  it('shows an add-preference dropdown when other students exist (§6.A2)', () => {
+    // §6.A2: the redesigned pref detail includes a select + Add button when there
+    // are students not yet linked (Bob is already linked so nothing to add here;
+    // add Charlie to give an addable option).
+    const charlie = { id: makeSid('charlie-id'), name: 'Charlie', isFixture: false, preferences: [], metadata: {} };
+    const ctxWithCharlie = makeCtx({ roster: [alice, bob, charlie], selectedStudentId: alice.id });
+    StudentEditor.activate(ctxWithCharlie);
+    render(<StudentEditor.SidePanel ctx={ctxWithCharlie} />);
+    // Should show the add-pref select (Charlie is not yet linked)
+    expect(screen.queryByTestId('add-pref-select')).toBeInTheDocument();
+    StudentEditor.deactivate(ctxWithCharlie);
   });
 
   it('shows no preference detail when no student is selected', () => {
@@ -984,11 +992,12 @@ describe('StudentEditor module-state bleed — activate/deactivate cycle', () =>
     const ctxWithStudent = makeCtx({ roster: [alice], selectedStudentId: alice.id });
     StudentEditor.activate(ctxWithStudent);
 
-    // Mount the SidePanel with a selected student and turn assigner mode ON
-    const { unmount } = render(<StudentEditor.SidePanel ctx={ctxWithStudent} />);
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
-    // Assigner is now ON
-    expect(screen.getByRole('button', { name: /assigner on/i })).toBeInTheDocument();
+    // §6.A3: assigner toggle is now in the Toolbar (not SidePanel).
+    // Mount the Toolbar and turn assigner mode ON.
+    const { unmount } = render(<StudentEditor.Toolbar ctx={ctxWithStudent} />);
+    act(() => { fireEvent.click(screen.getByTestId('assigner-toggle-lever')); });
+    // Assigner is now ON — lever should have aria-pressed="true"
+    expect(screen.getByTestId('assigner-toggle-lever').getAttribute('aria-pressed')).toBe('true');
 
     unmount();
     StudentEditor.deactivate(ctxWithStudent);

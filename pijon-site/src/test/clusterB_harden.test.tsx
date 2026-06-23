@@ -164,15 +164,14 @@ describe('H1 weight e2e: clicked weight reaches setMutualPreference exactly', ()
     const { ctx } = buildCtxWithDesks();
     StudentEditor.activate(ctx);
 
-    // Render Toolbar + SidePanel so both weight callback and assigner mode are wired
+    // Render Toolbar so both weight callback and assigner mode are wired
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    render(<StudentEditor.SidePanel ctx={ctx} />);
 
     // Click the +2 weight button in the toolbar
     act(() => { fireEvent.click(screen.getByTestId('weight-btn-2')); });
 
-    // Enable assigner mode via SidePanel toggle
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
+    // Enable assigner mode via lever toggle in Toolbar (§6.A3)
+    act(() => { fireEvent.click(screen.getByTestId('assigner-toggle-lever')); });
 
     doAssignerTwoClick(ctx);
 
@@ -186,10 +185,9 @@ describe('H1 weight e2e: clicked weight reaches setMutualPreference exactly', ()
     StudentEditor.activate(ctx);
 
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    render(<StudentEditor.SidePanel ctx={ctx} />);
 
     act(() => { fireEvent.click(screen.getByTestId('weight-btn--2')); });
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
+    act(() => { fireEvent.click(screen.getByTestId('assigner-toggle-lever')); });
 
     doAssignerTwoClick(ctx);
 
@@ -203,10 +201,9 @@ describe('H1 weight e2e: clicked weight reaches setMutualPreference exactly', ()
     StudentEditor.activate(ctx);
 
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    render(<StudentEditor.SidePanel ctx={ctx} />);
 
     act(() => { fireEvent.click(screen.getByTestId('weight-btn-1')); });
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
+    act(() => { fireEvent.click(screen.getByTestId('assigner-toggle-lever')); });
 
     doAssignerTwoClick(ctx);
 
@@ -219,9 +216,9 @@ describe('H1 weight e2e: clicked weight reaches setMutualPreference exactly', ()
     const { ctx } = buildCtxWithDesks();
     StudentEditor.activate(ctx);
 
-    // No weight button click — default should be -1
-    render(<StudentEditor.SidePanel ctx={ctx} />);
-    act(() => { fireEvent.click(screen.getByRole('button', { name: /enable assigner/i })); });
+    // No weight button click — default should be -1; render Toolbar for assigner lever
+    render(<StudentEditor.Toolbar ctx={ctx} />);
+    act(() => { fireEvent.click(screen.getByTestId('assigner-toggle-lever')); });
 
     doAssignerTwoClick(ctx);
 
@@ -440,8 +437,8 @@ describe('H6 placeholder shown when selected student has no preferences', () => 
     StudentEditor.activate(ctx);
     render(<StudentEditor.SidePanel ctx={ctx} />);
 
-    // The placeholder message shown when there are no prefs
-    expect(screen.getByText(/none/i)).toBeInTheDocument();
+    // The placeholder message shown when there are no prefs (§6.A2 text)
+    expect(screen.getByText(/no preferences yet/i)).toBeInTheDocument();
 
     StudentEditor.deactivate(ctx);
   });
@@ -465,8 +462,9 @@ describe('H6 placeholder shown when selected student has no preferences', () => 
     StudentEditor.activate(ctx);
     render(<StudentEditor.SidePanel ctx={ctx} />);
 
-    // Preference is shown (Avoid direction label visible)
-    expect(screen.getByText('↓ Avoid')).toBeInTheDocument();
+    // Preference is shown — target student name visible in pref row (§6.A2 new format)
+    // getAllByText because "Bob" also appears in the roster list
+    expect(screen.getAllByText('Bob').length).toBeGreaterThan(0);
 
     StudentEditor.deactivate(ctx);
   });
