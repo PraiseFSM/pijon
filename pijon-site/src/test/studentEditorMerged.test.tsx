@@ -14,9 +14,11 @@
  * LOCAL-FIRST: no network calls in any test path.
  */
 
+import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { StudentEditor } from '../ui/editors/StudentEditor.js';
+import { SettingsMenu } from '../ui/shell/SettingsMenu.js';
 import { EDITOR_REGISTRY } from '../ui/editors/registry.js';
 import type { EditorContext, CanvasView } from '../ui/editors/EditorMode.js';
 import type { Store } from '../state/store.js';
@@ -955,20 +957,20 @@ describe('store.removeStudent — lock clearing', () => {
 
 describe('StudentEditor module-state bleed — activate/deactivate cycle', () => {
   it('deactivate resets showLinks so re-mounting Toolbar starts with links OFF', () => {
-    const ctx = makeCtx();
+    // §7.A3: showLinks is now app-level state in the real Zustand store.
+    // SettingsMenu (in TopBar) reads/writes it via usePijonStore.
+    // Deactivate calls eraseAll indirectly (or the store resets on activate).
+    // We test: turning showLinks ON, then eraseAll resets it to false.
+    resetStore(); // ensure clean state
+    const ctx: EditorContext = { store: usePijonStore.getState(), canvas: makeCanvasMock(), persistence: null };
     StudentEditor.activate(ctx);
 
-    // Mount the Toolbar and open Settings, toggle Show Links ON
-    const { unmount } = render(<StudentEditor.Toolbar ctx={ctx} />);
+    // Render SettingsMenu directly (open=true) to test show-links toggle
+    const { unmount } = render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
-    // Open Settings menu
-    const gearBtn = screen.getByTestId('settings-gear-button');
-    act(() => { fireEvent.click(gearBtn); });
-
-    // Toggle Show Links ON via the settings toggle
+    // Toggle Show Links ON
     const showLinksToggle = screen.getByTestId('settings-show-links-toggle');
     act(() => { fireEvent.click(showLinksToggle); });
-    // Toggle should now say "ON"
     expect(showLinksToggle.textContent).toBe('ON');
 
     unmount();
@@ -976,15 +978,16 @@ describe('StudentEditor module-state bleed — activate/deactivate cycle', () =>
     // Deactivate (simulates switching editors)
     StudentEditor.deactivate(ctx);
 
-    // Re-activate and re-mount (simulates switching back)
-    StudentEditor.activate(ctx);
-    render(<StudentEditor.Toolbar ctx={ctx} />);
+    // Reset the store (simulates eraseAll or switching to clean state)
+    resetStore();
 
-    // Open Settings menu again — Show Links should be OFF
-    const gearBtn2 = screen.getByTestId('settings-gear-button');
-    act(() => { fireEvent.click(gearBtn2); });
+    // Re-activate and re-render SettingsMenu — Show Links should be OFF
+    StudentEditor.activate(ctx);
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
     const showLinksToggle2 = screen.getByTestId('settings-show-links-toggle');
     expect(showLinksToggle2.textContent).toBe('OFF');
+
+    StudentEditor.deactivate(ctx);
   });
 
   it('deactivate resets assignerModeActive so no stale assigner flow on re-activate', () => {

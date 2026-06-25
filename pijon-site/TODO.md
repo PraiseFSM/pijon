@@ -186,6 +186,42 @@ critical re-click-with-conflicts guard + bounds-clamp). New tests: `domain/granu
 > bar, red assigner cursor), B (granularity grid-line thickness hierarchy, scroll-wheel zoom), C (granularity
 > ghost-fix overlay). Suite: **1441 tests green**, tsc + lint clean, production PWA build OK.
 
+### Iteration 7 — round-5 feedback (processed from feedback.txt, 2026-06-23)
+
+Conductor translation; each cluster gets a builder + checker pass with tests. Outline updated to match
+(Experience single top bar, Seating, Settings unified, Look & feel themes). Run sequentially (heavy
+shared-file overlap: App.tsx, both toolbars, SettingsMenu.tsx, theme/colors.ts). NOTE: the "scroll zoom
+isn't working" feedback was a **false alarm — wheel zoom works** (user input error); dropped. The
+"scale should be adjustable" need is covered by 7.B (Settings UI-scale control).
+
+**Cluster A — One unified top bar + unified Settings + algorithm→Allocate dropdown. ✅ COMPLETE 2026-06-23.**
+Builder + checker; verified suite 1460 green, tsc + lint clean, build OK. New shared `ui/components/ToggleLever.tsx`
+(used by the editor switch AND the assigner toggle); dead `EditorSwitcher.tsx` removed. Checker added 44 tests
+(`iteration7_topbar.test.tsx`) and fixed a builder deviation (editor switch was tabs → now a lever).
+- [x] **7.A1 Editor switcher merged into the single top bar** as a **Furniture/Students `ToggleLever`**
+  (`editor-mode-lever`); separate switcher row removed; logo + lever lead the one top bar.
+- [x] **7.A2 Top-bar ordering per mode** with a shared trailing group (Settings gear · saved-status · Erase)
+  identical in both modes; TopBar owns the frame, editor toolbars provide the middle controls.
+- [x] **7.A3 Unified `SettingsMenu`** rendered by TopBar (both modes); BG image toggle + grid-color picker
+  moved in from the furniture toolbar; Nearness, Show Violations, Show Links retained.
+- [x] **7.A4 Algorithm/variant → `AllocateSplitButton` dropdown** (Greedy/Random + allocate/smart_shuffle);
+  removed from Settings.
+
+**Cluster B — UI scale. ✅ COMPLETE 2026-06-23.** Builder + checker; verified suite 1496 green, tsc + lint
+clean, build OK. `uiScale` in the store (default 1.2 = +20%, clamp 0.5–3.0), persisted to localStorage
+(`pijon_uiScale`), preserved across `eraseAll`; App passes `48 × uiScale` to ClassroomCanvas; preset
+buttons (80/100/120/150%) in the shared Settings; composes with scroll-wheel zoom. Checker added 9 tests
+(incl. App-integration + localStorage edge cases). Tests: `iteration7_uiScale.test.tsx`.
+- [x] **7.B1 Default UI scale +20% + Settings control**, persisted; composes with wheel zoom.
+
+**Cluster C — Color themes.** Files: `theme/colors.ts` (theme infra), shell/editor components reading colors,
+`ui/shell/SettingsMenu.tsx` (theme picker).
+- [ ] **7.C1 Theme infra** — a theme = a named palette; the UI reads colors through the active theme,
+  not hardcoded. Built so adding a 3rd/4th theme is just another named palette. Persist the choice.
+- [ ] **7.C2 Two themes + picker in Settings.** Theme 1 "Classic" = current light look. Theme 2
+  "Purple/Green": area behind the placer grid `#939598`, top bar `#84659a`, left panel `#48765d`
+  (derive the rest of the palette to match). Tests + checker.
+
 ## Deferred tests (write later)
 
 Tests were paused to conserve usage. Code below was shipped WITHOUT tests and needs an

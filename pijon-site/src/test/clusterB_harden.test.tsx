@@ -29,7 +29,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
+import React from 'react';
 import { StudentEditor } from '../ui/editors/StudentEditor.js';
+import { SettingsMenu } from '../ui/shell/SettingsMenu.js';
+import { usePijonStore } from '../state/store.js';
 import type { EditorContext, CanvasView } from '../ui/editors/EditorMode.js';
 import type { Store } from '../state/store.js';
 import type { FurnitureId } from '../domain/types.js';
@@ -78,6 +81,7 @@ const makeStoreMock = (overrides?: Partial<Store>): Store =>
     unlockSeat: vi.fn(),
     setThreshold: vi.fn(),
     setShowViolations: vi.fn(),
+    setUiScale: vi.fn(),
     ...overrides,
   } as unknown as Store);
 
@@ -262,49 +266,49 @@ describe('H2 activate resets currentWeight to -1.0', () => {
 
 // ---------------------------------------------------------------------------
 // H3 — showLinks canvas wiring: toggling Show Links calls requestRepaint
+//
+// §7.A3: Show Links toggle now lives in the shared SettingsMenu (in TopBar).
+// Tests render SettingsMenu directly with open=true and a real canvas mock.
+// The ctx.store must use the real Zustand store so setShowLinks actually updates
+// the store state (SettingsMenu reads showLinks via usePijonStore selector).
 // ---------------------------------------------------------------------------
 
 describe('H3 showLinks toggle drives canvas requestRepaint', () => {
-  let ctx: EditorContext;
-
   beforeEach(() => {
-    ctx = makeCtx();
-    StudentEditor.activate(ctx);
-  });
-
-  afterEach(() => {
-    StudentEditor.deactivate(ctx);
+    usePijonStore.getState().eraseAll();
   });
 
   it('toggling Show Links ON calls ctx.canvas.requestRepaint', () => {
-    render(<StudentEditor.Toolbar ctx={ctx} />);
+    const canvas = makeCanvasMock();
+    const ctx: EditorContext = { store: usePijonStore.getState(), canvas, persistence: null };
 
-    // Open settings
-    act(() => { fireEvent.click(screen.getByTestId('settings-gear-button')); });
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
     // Count repaint calls before toggle
-    const repaintBefore = (ctx.canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length;
+    const repaintBefore = (canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length;
 
     // Toggle Show Links ON
     act(() => { fireEvent.click(screen.getByTestId('settings-show-links-toggle')); });
 
-    const repaintAfter = (ctx.canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length;
+    const repaintAfter = (canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(repaintAfter).toBeGreaterThan(repaintBefore);
   });
 
   it('toggling Show Links OFF also calls ctx.canvas.requestRepaint', () => {
-    render(<StudentEditor.Toolbar ctx={ctx} />);
-    act(() => { fireEvent.click(screen.getByTestId('settings-gear-button')); });
+    const canvas = makeCanvasMock();
+    const ctx: EditorContext = { store: usePijonStore.getState(), canvas, persistence: null };
+
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
     // Toggle ON first
     act(() => { fireEvent.click(screen.getByTestId('settings-show-links-toggle')); });
 
-    const repaintMid = (ctx.canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length;
+    const repaintMid = (canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length;
 
     // Toggle OFF
     act(() => { fireEvent.click(screen.getByTestId('settings-show-links-toggle')); });
 
-    expect((ctx.canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length)
+    expect((canvas.requestRepaint as ReturnType<typeof vi.fn>).mock.calls.length)
       .toBeGreaterThan(repaintMid);
   });
 });

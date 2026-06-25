@@ -13,7 +13,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
+import React from 'react';
 import { StudentEditor } from '../ui/editors/StudentEditor.js';
+import { SettingsMenu } from '../ui/shell/SettingsMenu.js';
+import { usePijonStore } from '../state/store.js';
 import type { EditorContext, CanvasView } from '../ui/editors/EditorMode.js';
 import type { Store } from '../state/store.js';
 import type { FurnitureId } from '../domain/types.js';
@@ -60,6 +63,10 @@ const makeStoreMock = (overrides?: Partial<Store>): Store =>
     unlockSeat: vi.fn(),
     setThreshold: vi.fn(),
     setShowViolations: vi.fn(),
+    setShowLinks: vi.fn(),
+    setUiScale: vi.fn(),
+    setBackgroundImage: vi.fn(),
+    setGridColor: vi.fn(),
     ...overrides,
   } as unknown as Store);
 
@@ -423,13 +430,19 @@ describe('§5.B4 Export/Import .pijon project file', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §5.B4 — Settings menu: algorithm, variant, Show Links
+// §5.B4 — Allocate dropdown (algorithm/variant) and Settings (Show Links)
+//
+// §7.A4: Algorithm and variant moved from SettingsMenu to Allocate split-button
+//         dropdown in the StudentToolbar. The gear/settings is now in TopBar.
+// §5.B4: Show Links still lives in SettingsMenu (rendered by TopBar).
+//         Tests that need the SettingsMenu render it directly with open=true.
 // ---------------------------------------------------------------------------
 
 describe('§5.B4 SettingsMenu controls', () => {
   let ctx: EditorContext;
 
   beforeEach(() => {
+    usePijonStore.getState().eraseAll();
     ctx = makeCtx();
     StudentEditor.activate(ctx);
   });
@@ -438,58 +451,56 @@ describe('§5.B4 SettingsMenu controls', () => {
     StudentEditor.deactivate(ctx);
   });
 
-  function openSettings() {
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-  }
-
-  it('settings gear button renders in toolbar', () => {
+  it('allocate dropdown toggle renders in toolbar', () => {
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    expect(screen.getByTestId('settings-gear-button')).toBeInTheDocument();
+    expect(screen.getByTestId('allocate-dropdown-toggle')).toBeInTheDocument();
   });
 
-  it('settings menu is hidden initially', () => {
+  it('allocate dropdown is hidden initially', () => {
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    expect(screen.queryByTestId('settings-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('allocate-dropdown-menu')).not.toBeInTheDocument();
   });
 
-  it('clicking gear opens settings menu', () => {
+  it('clicking dropdown toggle opens the dropdown', () => {
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
-    expect(screen.getByTestId('settings-menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    expect(screen.getByTestId('allocate-dropdown-menu')).toBeInTheDocument();
   });
 
   it('algorithm greedy radio is checked by default', () => {
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
-    // Use getAllByRole to get typed HTMLInputElement so .checked is available
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
     const radios = screen.getAllByRole('radio');
-    const greedyRadio = radios.find((r) => r.getAttribute('data-testid') === 'settings-algorithm-greedy');
+    const greedyRadio = radios.find((r) => r.getAttribute('data-testid') === 'allocate-algorithm-greedy');
     expect((greedyRadio as HTMLInputElement | undefined)?.checked).toBe(true);
   });
 
   it('switching algorithm to bogo marks bogo as checked', () => {
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
-    fireEvent.click(screen.getByTestId('settings-algorithm-bogo'));
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-algorithm-bogo'));
+    // Algorithm selection does not close the dropdown — radios are still visible
     const radios = screen.getAllByRole('radio');
-    const bogoRadio = radios.find((r) => r.getAttribute('data-testid') === 'settings-algorithm-bogo');
+    const bogoRadio = radios.find((r) => r.getAttribute('data-testid') === 'allocate-algorithm-bogo');
     expect((bogoRadio as HTMLInputElement | undefined)?.checked).toBe(true);
   });
 
   it('variant allocate radio is checked by default', () => {
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
     const radios = screen.getAllByRole('radio');
-    const allocateRadio = radios.find((r) => r.getAttribute('data-testid') === 'settings-variant-allocate');
+    const allocateRadio = radios.find((r) => r.getAttribute('data-testid') === 'allocate-variant-allocate');
     expect((allocateRadio as HTMLInputElement | undefined)?.checked).toBe(true);
   });
 
   it('switching variant to smart_shuffle marks smart_shuffle as checked', () => {
     render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
-    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-variant-smart_shuffle'));
+    // Variant selection closes dropdown; reopen to check
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
     const radios = screen.getAllByRole('radio');
-    const shuffleRadio = radios.find((r) => r.getAttribute('data-testid') === 'settings-variant-smart_shuffle');
+    const shuffleRadio = radios.find((r) => r.getAttribute('data-testid') === 'allocate-variant-smart_shuffle');
     expect((shuffleRadio as HTMLInputElement | undefined)?.checked).toBe(true);
   });
 
@@ -498,38 +509,39 @@ describe('§5.B4 SettingsMenu controls', () => {
     const ctxS = makeCtx({ smartShuffle });
     StudentEditor.activate(ctxS);
     render(<StudentEditor.Toolbar ctx={ctxS} />);
-    openSettings();
-    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-variant-smart_shuffle'));
     fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(smartShuffle).toHaveBeenCalledTimes(1);
     StudentEditor.deactivate(ctxS);
   });
 
-  it('Show Links toggle starts OFF', () => {
-    render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
+  it('Show Links toggle starts OFF (in SettingsMenu)', () => {
+    // SettingsMenu reads showLinks from the real store; use real store actions
+    const realCtx: EditorContext = { store: usePijonStore.getState(), canvas: makeCanvasMock(), persistence: null };
+    render(React.createElement(SettingsMenu, { ctx: realCtx, open: true, onClose: vi.fn() }));
     const toggle = screen.getByTestId('settings-show-links-toggle');
     expect(toggle.textContent).toBe('OFF');
   });
 
   it('clicking Show Links toggle flips it to ON', () => {
-    render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
+    const realCtx: EditorContext = { store: usePijonStore.getState(), canvas: makeCanvasMock(), persistence: null };
+    render(React.createElement(SettingsMenu, { ctx: realCtx, open: true, onClose: vi.fn() }));
     act(() => { fireEvent.click(screen.getByTestId('settings-show-links-toggle')); });
     expect(screen.getByTestId('settings-show-links-toggle').textContent).toBe('ON');
   });
 
   it('toggling Show Links ON then OFF returns to OFF', () => {
-    render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
+    const realCtx: EditorContext = { store: usePijonStore.getState(), canvas: makeCanvasMock(), persistence: null };
+    render(React.createElement(SettingsMenu, { ctx: realCtx, open: true, onClose: vi.fn() }));
     act(() => { fireEvent.click(screen.getByTestId('settings-show-links-toggle')); });
     act(() => { fireEvent.click(screen.getByTestId('settings-show-links-toggle')); });
     expect(screen.getByTestId('settings-show-links-toggle').textContent).toBe('OFF');
   });
 
   it('aria-pressed on Show Links toggle matches state', () => {
-    render(<StudentEditor.Toolbar ctx={ctx} />);
-    openSettings();
+    const realCtx: EditorContext = { store: usePijonStore.getState(), canvas: makeCanvasMock(), persistence: null };
+    render(React.createElement(SettingsMenu, { ctx: realCtx, open: true, onClose: vi.fn() }));
     const toggle = screen.getByTestId('settings-show-links-toggle');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     act(() => { fireEvent.click(toggle); });

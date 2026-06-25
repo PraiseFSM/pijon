@@ -34,7 +34,7 @@
  * LOCAL-FIRST: no fetch(), no XHR, no WebSocket. All writes go through the Zustand store.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureKind, Vec2 } from '../../domain/types.js';
 import { furnitureId } from '../../domain/types.js';
@@ -44,7 +44,7 @@ import { furnitureToPixelRect } from '../canvas/hitTest.js';
 import { resizeButtonRects, hitButton, ghostRingCells, type ResizeButton } from '../canvas/ghostRing.js';
 import { usePijonStore } from '../../state/store.js';
 import { getImage } from '../canvas/imageCache.js';
-import { furnitureAssetUrl, ASSET } from '../../assets/paths.js';
+import { furnitureAssetUrl } from '../../assets/paths.js';
 import { makeClassroom, canRemoveEdge, granularityConflicts } from '../../domain/classroom.js';
 import type { Classroom, GranularityConflict } from '../../domain/classroom.js';
 
@@ -62,7 +62,7 @@ function removableButtons(
 ): readonly ResizeButton[] {
   return buttons.filter((b) => b.sign === 1 || canRemoveEdge(classroom, b.edge));
 }
-import { GridColorButton, GridColorPickerPopover } from './GridColorPicker.js';
+// GridColorButton/GridColorPickerPopover moved to SettingsMenu (§7.A3)
 import {
   toolbarBackground,
   toolbarBorder,
@@ -399,8 +399,7 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
    * but held in React state so the banner re-renders correctly).
    */
   const [fixModeG, setFixModeG] = useState<number | null>(null);
-  /** §14.5 — grid color picker open state */
-  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  // §7.A3 — grid color picker and BG toggle moved to shared SettingsMenu
 
   const handleNew = () => {
     const fresh = makeClassroom(
@@ -539,19 +538,6 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     };
   }, []);
 
-  /** §14.5 — Handle live grid color changes from the picker (onInput = continuous). */
-  const handleGridColorChange = useCallback(
-    (color: string | null) => {
-      ctx.store.setGridColor(color);
-      ctx.canvas.requestRepaint();
-    },
-    [ctx.store, ctx.canvas],
-  );
-
-  const handleColorPickerClose = useCallback(() => {
-    setColorPickerOpen(false);
-  }, []);
-
   const btn: React.CSSProperties = {
     padding: '3px 9px',
     borderRadius: 4,
@@ -644,7 +630,6 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           padding: '5px 10px',
         }}
       >
-        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: textDark }}>Furniture</span>
         <button style={btn} onClick={handleNew} type="button">New</button>
         <button style={btn} onClick={handleClear} type="button">Clear</button>
         <button style={btn} onClick={handleSave} type="button" title="Save classroom to a .pijon file">Save…</button>
@@ -691,51 +676,7 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           })}
         </div>
 
-        {sep}
-
-        {/* §14.4 — Background image toggle */}
-        <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>BG:</span>
-        <button
-          type="button"
-          style={{
-            ...btn,
-            fontSize: '0.78rem',
-            background: classroom.backgroundImage ? '#e3f2fd' : btnBackground,
-            borderColor: classroom.backgroundImage ? '#1565c0' : btnBorder,
-            color: classroom.backgroundImage ? '#0d47a1' : textDark,
-          }}
-          title={
-            classroom.backgroundImage
-              ? 'Click to disable the classroom background image'
-              : 'Click to enable the classroom background image (classroom-background.png)'
-          }
-          onClick={() => {
-            ctx.store.setBackgroundImage(
-              classroom.backgroundImage ? null : ASSET.background,
-            );
-            ctx.canvas.requestRepaint();
-          }}
-        >
-          {classroom.backgroundImage ? 'On' : 'Off'}
-        </button>
-
-        {sep}
-
-        {/* §14.5 — Grid color picker */}
-        <span style={{ fontSize: '0.78rem', color: textMedium, fontWeight: 600 }}>Grid Color:</span>
-        <div style={{ position: 'relative' }}>
-          <GridColorButton
-            open={colorPickerOpen}
-            currentColor={classroom.gridColor ?? null}
-            onClick={() => { setColorPickerOpen((v) => !v); }}
-          />
-          <GridColorPickerPopover
-            open={colorPickerOpen}
-            currentColor={classroom.gridColor ?? null}
-            onChange={handleGridColorChange}
-            onClose={handleColorPickerClose}
-          />
-        </div>
+        {/* §7.A3 — BG image toggle and grid color picker moved to shared SettingsMenu */}
       </div>
     </div>
   );

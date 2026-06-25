@@ -110,9 +110,7 @@ to the furniture tool and your seating is still there.
 
 ```
  ┌─────────────────────────────────────────────────────────────────┐
- │  [ Furniture ] [ Students ]                    ← pick a tool       │  editor switcher
- ├─────────────────────────────────────────────────────────────────┤
- │  tool-specific toolbar (changes per editor)                       │  TOP BAR (swaps)
+ │ ▣ [Furn|Stud]  …tool controls…   [gap]  ⚙  ● saved  Erase        │  ONE TOP BAR
  ├───────────────┬─────────────────────────────────────────────────┤
  │ left panel    │                                                   │
  │ (roster /     │            the classroom grid                     │  GRID (shared, never swaps)
@@ -120,10 +118,20 @@ to the furniture tool and your seating is still there.
  └───────────────┴─────────────────────────────────────────────────┘
 ```
 
-Switching tools swaps the **top bar** and the **left side panel**. The **grid stays put**, with all
-furniture and seating intact. Everything autosaves as you go. Pijon uses a **single left panel** — in
-the Students editor the roster sits on the left, and selecting a student reveals their summary and
-preferences **directly beneath that student** in the same panel (there is no separate right panel).
+There is **one top bar** (no separate switcher row). It holds, left to right: the **logo**, the
+**Furniture/Students lever** (a toggle that switches editors), then the active editor's controls, a
+flexible **gap**, then the shared trailing group: **Settings (⚙)**, the **"saved locally"** status, and
+**Erase all**. Switching the lever swaps the editor's controls and the **left side panel**; the **grid
+stays put**, with all furniture and seating intact. Everything autosaves as you go. Pijon uses a
+**single left panel** — in the Students editor the roster sits on the left, and selecting a student
+reveals their summary and preferences **directly beneath that student** (there is no separate right panel).
+
+The top bar's middle section is per editor:
+- **Furniture mode:** New · Clear · Save · Load · Grid (size readout / resize) · Granularity.
+- **Students mode:** Allocate (with an algorithm dropdown) · Clear · Undo · Redo · weight selector
+  (−2 −1 +1 +2) · Assigner lever · Export · Import.
+
+Settings, the saved-status indicator, and Erase all are **shared and identical in both modes**.
 
 ---
 
@@ -183,22 +191,25 @@ spot is still invalid).
 above the Import-CSV control, which is the last item in the roster panel); edit names; add / remove
 students; export. (Later: import from a pasted spreadsheet column.)
 
-**Seating** — the Students editor **top bar** holds, in order: **Allocate**, **Clear**, **Undo /
-Redo**, a **weight selector** (−2, −1, +1, +2 — the strength applied to the next preference link)
-together with an **assigner-mode toggle** in the same section (a clear on/off **toggle lever**), **Export**
-and **Import** (the portable **`.pijon` project file**), and **Settings**. When assigner mode is on, the
-**cursor changes** to signal it (a red cursor for now, swappable for a custom image later). Beyond the
+**Seating** — the Students editor's top-bar controls are (see *The Experience* for the full bar):
+**Allocate** — a split button whose **dropdown picks the algorithm (Greedy / Random) and the
+allocate-vs-smart-shuffle variant** (keep-locks); **Clear**; **Undo / Redo**; a **weight selector**
+(−2, −1, +1, +2 — the strength applied to the next preference link) with an **assigner-mode toggle lever**
+in the same section; **Export** and **Import** (the portable **`.pijon` project file**). When assigner mode
+is on, the **cursor changes** to signal it (a red cursor for now, swappable for a custom image later). Beyond the
 toolbar: drag students between desks (swap/move); **drag a student straight from the roster onto a
 desk** (same behaviour as dragging between desks — seat them, swapping if occupied); lock a student to
 a desk so suggestions won't move them; show constraint violations (on by default, kept live as
 preferences change); show a desk's neighbors; an **invalid-seating banner** warns when there are more
 students than seats or students left unplaced.
 
-**Settings** (gear button in the Students editor toolbar) — a lightweight popover that houses
-low-frequency controls: the **algorithm choice** (Greedy / Random) and the **allocate-vs-smart-shuffle**
-variant (keep-locks); the **Nearness** proximity threshold (in real units, stored per classroom so
-allocate, violations, and neighbor preview always agree); the **Show Violations** toggle (defaults to
-on); and the **Show Links** toggle for preference lines.
+**Settings** (gear button, shared in the top bar of **both** editor modes — one unified popover with the
+same controls everywhere) — a lightweight popover for low-frequency controls: **Nearness** proximity
+threshold (in real units, stored per classroom so allocate, violations, and neighbor preview always
+agree); **Show Violations** (defaults to on); **Show Links** (preference lines); the **classroom
+background image** toggle and **grid color** picker (moved here from the furniture toolbar); a **UI-scale**
+control (adjusts the on-screen size; default scale is comfortable, ~20% larger than the original); and
+the **color theme** picker. (Algorithm choice is *not* in Settings — it lives in the Allocate dropdown.)
 
 **Preferences** (inside the Students editor, single left panel) — set "near / avoid" between students
 and toward room features. The **weight is chosen from four fixed options — −2, −1, +1, +2** (avoid
@@ -223,6 +234,13 @@ the selected weight) or drag/seat interactions. All student↔student preference
   recolors **live** as you drag within the picker.
 - A single **colors file** controls every non-image color in the app (buttons, backgrounds, menu
   bars, windows, panels) so the whole UI can be re-themed from one place.
+- **Color themes.** Pijon ships selectable themes (chosen in Settings) and is built so **adding another
+  theme is easy** — a theme is just a named set of color values; the rest of the UI reads colors
+  through the theme, never hardcoded. Ships with at least:
+  - **Theme 1 — "Classic" (default):** the current light look (white surfaces; furniture-style fills).
+  - **Theme 2 — "Purple/Green":** the area *behind* the placer grid (not the grid itself) `#939598`,
+    the top bar `#84659a`, the left panel `#48765d`.
+  The theme system should make a third/fourth theme a matter of adding one more named palette.
 
 **Saving & sharing** — autosave; save/open a project file the teacher controls; export an
 arrangement (and later, print / export to image or PDF).

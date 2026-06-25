@@ -36,6 +36,8 @@
 import { create } from 'zustand';
 import type { FurnitureId, Vec2, StudentId } from '../domain/types.js';
 import { furnitureId, studentId } from '../domain/types.js';
+import type { ThemeId } from '../theme/themes.js';
+import { THEMES, DEFAULT_THEME_ID, _setActiveThemeInternal, applyThemeVars } from '../theme/themes.js';
 import type { Student } from '../domain/student.js';
 import {
   makeStudent,
@@ -78,6 +80,91 @@ import type { LoadedProject } from '../domain/io/projectFile.js';
 
 /** Maximum number of undo/redo snapshots kept in memory. */
 const MAX_HISTORY = 50;
+
+// ---------------------------------------------------------------------------
+// §7.B1 — UI scale constants and localStorage persistence helpers
+// ---------------------------------------------------------------------------
+
+/** Minimum UI scale multiplier (0.5× of the 48 px base → 24 px per unit). */
+export const UI_SCALE_MIN = 0.5;
+/** Maximum UI scale multiplier (3× of the 48 px base → 144 px per unit). */
+export const UI_SCALE_MAX = 3.0;
+/**
+ * Default UI scale: 1.2 (≈ +20% over the original 48 px base → ~58 px/unit).
+ * On-screen only — does NOT affect classroom units or furniture real sizes.
+ */
+export const UI_SCALE_DEFAULT = 1.2;
+
+const UI_SCALE_STORAGE_KEY = 'pijon_uiScale';
+
+/**
+ * Read the persisted UI scale from localStorage.
+ * Falls back to UI_SCALE_DEFAULT if the value is absent or out of range.
+ * (localStorage access is guarded so this is safe in SSR / test environments
+ * that stub localStorage.)
+ */
+function readPersistedUiScale(): number {
+  try {
+    const raw = localStorage.getItem(UI_SCALE_STORAGE_KEY);
+    if (raw === null) return UI_SCALE_DEFAULT;
+    const parsed = parseFloat(raw);
+    if (!Number.isFinite(parsed)) return UI_SCALE_DEFAULT;
+    // Clamp to valid range
+    return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, parsed));
+  } catch {
+    return UI_SCALE_DEFAULT;
+  }
+}
+
+/**
+ * Write the UI scale to localStorage. Silently ignores storage errors
+ * (private-browsing mode, quota exceeded, etc.) — the app still works,
+ * the preference just won't survive a reload.
+ */
+function writePersistedUiScale(scale: number): void {
+  try {
+    localStorage.setItem(UI_SCALE_STORAGE_KEY, scale.toString());
+  } catch {
+    // Ignore — best-effort persistence
+  }
+}
+
+// ---------------------------------------------------------------------------
+// §7.C1 — Theme id constants and localStorage persistence helpers
+// ---------------------------------------------------------------------------
+
+const THEME_STORAGE_KEY = 'pijon_themeId';
+
+/**
+ * Read the persisted theme id from localStorage.
+ * Falls back to DEFAULT_THEME_ID if the value is absent, unknown, or corrupt.
+ * (localStorage access is guarded so this is safe in SSR / test environments
+ * that stub localStorage.)
+ */
+export function readPersistedTheme(): ThemeId {
+  try {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (raw === null) return DEFAULT_THEME_ID;
+    // Validate: only accept ids that exist in the THEMES registry
+    if (raw in THEMES) return raw as ThemeId;
+    return DEFAULT_THEME_ID;
+  } catch {
+    return DEFAULT_THEME_ID;
+  }
+}
+
+/**
+ * Write the theme id to localStorage. Silently ignores storage errors
+ * (private-browsing mode, quota exceeded, etc.) — the app still works,
+ * the preference just won't survive a reload.
+ */
+function writePersistedTheme(id: ThemeId): void {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, id);
+  } catch {
+    // Ignore — best-effort persistence
+  }
+}
 
 // ---------------------------------------------------------------------------
 // SaveStatus
@@ -157,6 +244,41 @@ export interface PijonState {
    * app-level config — do NOT put it in the project file.
    */
   showViolations: boolean;
+
+  /**
+   * §7.A3 — Whether to draw preference links between currently-seated students.
+   * Moved from StudentEditor's local toolbar state to the store so it persists
+   * across editor switches and is accessible from the shared Settings menu.
+   * App-level UI state — not per-project, not in the .pijon file.
+   * Defaults to false.
+   */
+  showLinks: boolean;
+
+  /**
+   * §7.B1 — UI scale multiplier applied to the base canvas cell size (48 px).
+   * On-screen only: does NOT affect classroom.cellsPerUnit, units, or furniture
+   * real sizes. Composes with the scroll-wheel zoom factor multiplicatively.
+   *
+   * Default: 1.2 (≈ 20% larger than the original 48 px base → ~58 px per unit).
+   * Clamped: [0.5, 3.0].
+   *
+   * Persistence: stored in localStorage under key "pijon_uiScale" so it
+   * survives page reloads. This is an app-level display preference (same
+   * reasoning as showViolations/showLinks: not per-classroom, not in the .pijon
+   * project file). localStorage is the simplest robust mechanism for a single
+   * scalar that needs cross-session survival but is NOT part of the classroom
+   * document (no IndexedDB migration needed).
+   */
+  uiScale: number;
+
+  /**
+   * §7.C1 — Active color theme id.
+   * App-level display preference — not per-classroom, not in the .pijon file.
+   * Persisted to localStorage under "pijon_themeId".
+   * Default: 'classic'.
+   * Preserved across eraseAll() (same reasoning as uiScale).
+   */
+  themeId: ThemeId;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +500,19 @@ export interface PijonActions {
   setShowViolations(on: boolean): void;
 
   /**
+   * §7.A3 — Toggle or explicitly set preference-link visibility.
+   * App-level UI state; defaults to false.
+   */
+  setShowLinks(on: boolean): void;
+
+  /**
+   * §7.B1 — Set the UI scale multiplier.
+   * Clamped to [UI_SCALE_MIN, UI_SCALE_MAX].
+   * Persisted to localStorage under "pijon_uiScale".
+   */
+  setUiScale(scale: number): void;
+
+  /**
    * §14.4 — Set or clear the classroom background image URL.
    * Pass a URL string to enable (e.g. ASSET.background).
    * Pass null to disable (restores plain-color appearance).
@@ -393,6 +528,14 @@ export interface PijonActions {
    * Same-reference short-circuit: no-ops when color hasn't changed.
    */
   setGridColor(color: string | null): void;
+
+  /**
+   * §7.C1 — Set the active color theme.
+   * Updates themeId in the store, persists to localStorage, updates the
+   * module-level canvas palette cache, and applies CSS custom properties
+   * to document.documentElement so DOM and canvas both update.
+   */
+  setTheme(id: ThemeId): void;
 
   // -- Erase --
 
@@ -456,6 +599,15 @@ const EMPTY_STATE: PijonState = {
   resizeGridWarning: null,
   // §13.5: violations are ON by default — teachers see constraint feedback immediately.
   showViolations: true,
+  // §7.A3: preference links are OFF by default.
+  showLinks: false,
+  // §7.B1: uiScale is a placeholder here; the real initial value is read from
+  // localStorage inside the store's create() callback (see below) so the read
+  // is deferred past module load, ensuring the jsdom/browser environment is ready.
+  uiScale: UI_SCALE_DEFAULT,
+  // §7.C1: themeId is a placeholder here; the real initial value is read from
+  // localStorage inside the store's create() callback (same pattern as uiScale).
+  themeId: DEFAULT_THEME_ID,
 };
 
 // ---------------------------------------------------------------------------
@@ -520,6 +672,12 @@ function applyArrangement(
 
 export const usePijonStore = create<PijonStore>()((set, get) => ({
   ...EMPTY_STATE,
+  // §7.B1: Override the placeholder uiScale with the persisted value read
+  // from localStorage here (inside create(), so jsdom is ready in tests).
+  uiScale: readPersistedUiScale(),
+  // §7.C1: Override the placeholder themeId with the persisted value read
+  // from localStorage (same deferred pattern as uiScale).
+  themeId: readPersistedTheme(),
 
   // ---- Lifecycle -----------------------------------------------------------
 
@@ -995,6 +1153,20 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
     set({ showViolations: on });
   },
 
+  // ---- Show links (§7.A3) -------------------------------------------------
+
+  setShowLinks(on: boolean) {
+    set({ showLinks: on });
+  },
+
+  // ---- UI scale (§7.B1) ---------------------------------------------------
+
+  setUiScale(scale: number) {
+    const clamped = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, scale));
+    writePersistedUiScale(clamped);
+    set({ uiScale: clamped });
+  },
+
   // ---- Background image (§14.4) -------------------------------------------
 
   setBackgroundImage(url: string | null) {
@@ -1019,6 +1191,19 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
     });
   },
 
+  // ---- Theme (§7.C1) ------------------------------------------------------
+
+  setTheme(id: ThemeId) {
+    const palette = THEMES[id];
+    // Update the module-level canvas palette cache
+    _setActiveThemeInternal(palette);
+    // Apply CSS custom properties to the DOM
+    applyThemeVars(palette);
+    // Persist and update store state
+    writePersistedTheme(id);
+    set({ themeId: id });
+  },
+
   // ---- Erase ---------------------------------------------------------------
 
   eraseAll() {
@@ -1028,6 +1213,12 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
       classroom: makeClassroom(crypto.randomUUID(), 'My Classroom', 10, 8),
       saveStatus: 'saved',
       showViolations: true,
+      showLinks: false,
+      // Preserve the teacher's display preferences across eraseAll
+      // (they are not classroom data — the teacher should not have to re-set
+      //  them every time they erase and start a new class).
+      uiScale: get().uiScale,
+      themeId: get().themeId,
     });
   },
 

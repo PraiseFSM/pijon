@@ -172,8 +172,9 @@ describe('§13.2 ALLOCATOR_REGISTRY', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §13.2 — Allocate button + Settings menu renders correctly (§5.B4)
-// SplitButton was replaced with a single Allocate button + SettingsMenu.
+// §13.2 — AllocateSplitButton renders correctly (§7.A4)
+// Algorithm and variant now live in the Allocate split-button dropdown
+// (not in a settings menu). The gear button is in TopBar, not the toolbar.
 // ---------------------------------------------------------------------------
 
 describe('§13.2 SplitButton renders in StudentToolbar', () => {
@@ -184,61 +185,61 @@ describe('§13.2 SplitButton renders in StudentToolbar', () => {
     expect(btn.textContent).toContain('Allocate');
   });
 
-  it('renders the settings (gear) button', () => {
+  it('renders the dropdown toggle arrow button', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    expect(screen.getByTestId('settings-gear-button')).toBeTruthy();
+    expect(screen.getByTestId('allocate-dropdown-toggle')).toBeTruthy();
   });
 
-  it('settings menu is not visible initially', () => {
+  it('allocate dropdown is not visible initially', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    expect(screen.queryByTestId('settings-menu')).toBeNull();
+    expect(screen.queryByTestId('allocate-dropdown-menu')).toBeNull();
   });
 
-  it('clicking the gear button opens the settings menu', () => {
+  it('clicking the dropdown toggle opens the dropdown', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    expect(screen.getByTestId('settings-menu')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    expect(screen.getByTestId('allocate-dropdown-menu')).toBeTruthy();
   });
 
-  it('settings menu contains variant radios for allocate and smart_shuffle', () => {
+  it('dropdown contains variant radios for allocate and smart_shuffle', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    expect(screen.getByTestId('settings-variant-allocate')).toBeTruthy();
-    expect(screen.getByTestId('settings-variant-smart_shuffle')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    expect(screen.getByTestId('allocate-variant-allocate')).toBeTruthy();
+    expect(screen.getByTestId('allocate-variant-smart_shuffle')).toBeTruthy();
   });
 
-  it('settings menu contains algorithm radios for each ALLOCATOR_REGISTRY entry', () => {
+  it('dropdown contains algorithm radios for each ALLOCATOR_REGISTRY entry', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
     for (const entry of ALLOCATOR_REGISTRY) {
-      expect(screen.getByTestId(`settings-algorithm-${entry.id}`)).toBeTruthy();
+      expect(screen.getByTestId(`allocate-algorithm-${entry.id}`)).toBeTruthy();
     }
   });
 
   it('Greedy algorithm radio is checked by default', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    const greedyRadio = screen.getByTestId<HTMLInputElement>('settings-algorithm-greedy');
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    const greedyRadio = screen.getByTestId<HTMLInputElement>('allocate-algorithm-greedy');
     expect(greedyRadio.checked).toBe(true);
   });
 
   it('allocate variant radio is checked by default', () => {
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    const allocateRadio = screen.getByTestId<HTMLInputElement>('settings-variant-allocate');
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    const allocateRadio = screen.getByTestId<HTMLInputElement>('allocate-variant-allocate');
     expect(allocateRadio.checked).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// §13.2 — Allocate button dispatches correct store action (§5.B4)
+// §13.2 — Allocate button dispatches correct store action (§7.A4)
 // ---------------------------------------------------------------------------
 
 describe('§13.2 SplitButton dispatches actions', () => {
@@ -267,33 +268,33 @@ describe('§13.2 SplitButton dispatches actions', () => {
     const ctx = makeCtx({ smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
 
-    // Open settings and switch variant
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    // Open dropdown and switch variant
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-variant-smart_shuffle'));
     // Click allocate button
     fireEvent.click(screen.getByTestId('allocate-btn'));
 
     expect(smartShuffle).toHaveBeenCalledTimes(1);
   });
 
-  it('switching variant to smart_shuffle — allocate-btn is still "Allocate" (single button)', () => {
-    // The single Allocate button label does NOT change — variant is reflected in Settings only
+  it('switching variant to smart_shuffle changes allocate-btn label to "Shuffle"', () => {
+    // The Allocate button label reflects the current variant: "Allocate" or "Shuffle"
     const ctx = makeCtx();
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open settings and switch variant
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
-    // The allocate-btn label is always "Allocate"
-    expect(screen.getByTestId('allocate-btn').textContent).toContain('Allocate');
+    // Open dropdown and switch variant
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-variant-smart_shuffle'));
+    // The allocate-btn label now shows "Shuffle"
+    expect(screen.getByTestId('allocate-btn').textContent).toContain('Shuffle');
   });
 
   it('switching algorithm to bogo then clicking allocate passes a BogoAllocator', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open settings and switch algorithm
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    fireEvent.click(screen.getByTestId('settings-algorithm-bogo'));
+    // Open dropdown and switch algorithm
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-algorithm-bogo'));
     // Click allocate button
     fireEvent.click(screen.getByTestId('allocate-btn'));
     // Should dispatch allocate with an allocator (BogoAllocator has allocate method)
@@ -302,21 +303,21 @@ describe('§13.2 SplitButton dispatches actions', () => {
     expect(typeof (receivedAllocator as { allocate?: unknown }).allocate).toBe('function');
   });
 
-  it('last algorithm choice is remembered: bogo radio stays checked after opening settings again', () => {
+  it('last algorithm choice is remembered: bogo radio stays checked after reopening dropdown', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
 
-    // Open settings
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    // Open dropdown
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
     // Select bogo
-    fireEvent.click(screen.getByTestId('settings-algorithm-bogo'));
+    fireEvent.click(screen.getByTestId('allocate-algorithm-bogo'));
 
-    // Close settings by clicking gear again (toggle)
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
+    // Close dropdown by clicking toggle again
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
     // Re-open
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    const bogoRadio = screen.getByTestId<HTMLInputElement>('settings-algorithm-bogo');
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    const bogoRadio = screen.getByTestId<HTMLInputElement>('allocate-algorithm-bogo');
     expect(bogoRadio.checked).toBe(true);
   });
 
@@ -325,9 +326,9 @@ describe('§13.2 SplitButton dispatches actions', () => {
     const ctx = makeCtx({ smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
 
-    // Open settings and switch variant to smart_shuffle
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    // Open dropdown and switch variant to smart_shuffle
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-variant-smart_shuffle'));
 
     // Clicking allocate button should dispatch smartShuffle (not allocate)
     fireEvent.click(screen.getByTestId('allocate-btn'));
@@ -933,9 +934,9 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     const allocate = vi.fn();
     const ctx = makeCtx({ allocate });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open settings and select bogo
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    fireEvent.click(screen.getByTestId('settings-algorithm-bogo'));
+    // Open dropdown and select bogo
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-algorithm-bogo'));
     // Click allocate
     fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(allocate).toHaveBeenCalledTimes(1);
@@ -948,9 +949,9 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     const smartShuffle = vi.fn();
     const ctx = makeCtx({ smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open settings and select smart_shuffle variant
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    fireEvent.click(screen.getByTestId('settings-variant-smart_shuffle'));
+    // Open dropdown and select smart_shuffle variant
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    fireEvent.click(screen.getByTestId('allocate-variant-smart_shuffle'));
     // Click allocate button
     fireEvent.click(screen.getByTestId('allocate-btn'));
     expect(smartShuffle).toHaveBeenCalledTimes(1);
@@ -959,18 +960,18 @@ describe('§13.2 SplitButton passes correct allocator class instances', () => {
     expect(arg).toBeInstanceOf(GreedyAllocator);
   });
 
-  it('settings-open-then-click-outside does NOT dispatch any action', () => {
+  it('dropdown-open-then-click-outside does NOT dispatch any action', () => {
     const allocate = vi.fn();
     const smartShuffle = vi.fn();
     const ctx = makeCtx({ allocate, smartShuffle });
     render(React.createElement(StudentEditor.Toolbar, { ctx }));
-    // Open settings
-    fireEvent.click(screen.getByTestId('settings-gear-button'));
-    expect(screen.getByTestId('settings-menu')).toBeTruthy();
-    // Click outside (on document body via pointerdown — SettingsMenu uses capture-phase listener)
+    // Open dropdown
+    fireEvent.click(screen.getByTestId('allocate-dropdown-toggle'));
+    expect(screen.getByTestId('allocate-dropdown-menu')).toBeTruthy();
+    // Click outside (on document body via pointerdown — dropdown uses capture-phase listener)
     act(() => { fireEvent.pointerDown(document.body); });
-    // Settings menu should now be closed
-    expect(screen.queryByTestId('settings-menu')).toBeNull();
+    // Dropdown should now be closed
+    expect(screen.queryByTestId('allocate-dropdown-menu')).toBeNull();
     // Neither action should have been dispatched
     expect(allocate).not.toHaveBeenCalled();
     expect(smartShuffle).not.toHaveBeenCalled();

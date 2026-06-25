@@ -19,7 +19,8 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 
 import { GridColorButton, GridColorPickerPopover, SWATCHES } from '../ui/editors/GridColorPicker.js';
-import { FurnitureEditor } from '../ui/editors/FurnitureEditor.js';
+import { SettingsMenu } from '../ui/shell/SettingsMenu.js';
+import { usePijonStore } from '../state/store.js';
 import { makeClassroom, setGridColor as domainSetGridColor } from '../domain/classroom.js';
 import { gridLine } from '../theme/colors.js';
 import type { EditorContext, CanvasView } from '../ui/editors/EditorMode.js';
@@ -386,23 +387,26 @@ describe('GridColorPickerPopover (§14.5)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// FurnitureEditor.Toolbar renders grid color button
+// SettingsMenu renders grid color button (§14.5 / §7.A3)
+// Grid color was moved from FurnitureEditor.Toolbar into SettingsMenu (§7.A3).
+// Tests now render SettingsMenu directly (open=true).
 // ---------------------------------------------------------------------------
 
 describe('FurnitureEditor Toolbar — grid color (§14.5)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    usePijonStore.getState().eraseAll();
   });
 
   it('renders the grid color button in the toolbar', () => {
     const ctx = makeCtx();
-    render(React.createElement(FurnitureEditor.Toolbar, { ctx }));
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
     expect(screen.getByTestId('grid-color-button')).toBeDefined();
   });
 
   it('clicking the grid color button opens the popover', () => {
     const ctx = makeCtx();
-    render(React.createElement(FurnitureEditor.Toolbar, { ctx }));
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
     // Popover not shown initially
     expect(screen.queryByTestId('grid-color-picker-popover')).toBeNull();
@@ -416,7 +420,7 @@ describe('FurnitureEditor Toolbar — grid color (§14.5)', () => {
 
   it('clicking the grid color button again closes the popover (toggle)', () => {
     const ctx = makeCtx();
-    render(React.createElement(FurnitureEditor.Toolbar, { ctx }));
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
     // Open
     fireEvent.click(screen.getByTestId('grid-color-button'));
@@ -431,7 +435,7 @@ describe('FurnitureEditor Toolbar — grid color (§14.5)', () => {
     const setGridColor = vi.fn();
     const ctx = makeCtx({ setGridColor });
 
-    render(React.createElement(FurnitureEditor.Toolbar, { ctx }));
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
     // Open the picker
     fireEvent.click(screen.getByTestId('grid-color-button'));
@@ -457,7 +461,7 @@ describe('FurnitureEditor Toolbar — grid color (§14.5)', () => {
       persistence: null,
     };
 
-    render(React.createElement(FurnitureEditor.Toolbar, { ctx }));
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
     // Open the picker
     fireEvent.click(screen.getByTestId('grid-color-button'));
@@ -471,13 +475,13 @@ describe('FurnitureEditor Toolbar — grid color (§14.5)', () => {
 
   it('resetting color calls store.setGridColor(null)', () => {
     const setGridColor = vi.fn();
-    // Store has a non-null gridColor so reset button is enabled
-    const ctx = makeCtx({
-      setGridColor,
+    // Set a non-null gridColor in the real store so reset button is enabled
+    usePijonStore.setState({
       classroom: domainSetGridColor(makeClassroom('test-classroom', 'Test', 5, 5), '#ff0000'),
     });
+    const ctx = makeCtx({ setGridColor });
 
-    render(React.createElement(FurnitureEditor.Toolbar, { ctx }));
+    render(React.createElement(SettingsMenu, { ctx, open: true, onClose: vi.fn() }));
 
     // Open the picker
     fireEvent.click(screen.getByTestId('grid-color-button'));

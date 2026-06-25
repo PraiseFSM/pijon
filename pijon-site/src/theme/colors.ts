@@ -38,11 +38,26 @@
 // 1. App shell & layout
 // ---------------------------------------------------------------------------
 
-export const appBackground = '#f0f0f0' as const;         // canvas area wrapper background
-export const shellBackground = '#fff' as const;           // EditorSwitcher row background
-export const toolbarBackground = '#f5f5f5' as const;      // TopBar / toolbar rows background
-export const toolbarBorder = '#ddd' as const;             // TopBar / toolbar bottom border
-export const panelBorder = '#ddd' as const;               // panel / divider borders (shared)
+/**
+ * §7.C1 — Themed tokens.
+ *
+ * These tokens reference CSS custom properties injected by applyThemeVars()
+ * (in src/theme/themes.ts). The second argument is the Classic fallback value,
+ * which is also the value used in environments where CSS vars are unavailable.
+ *
+ * Components import these token names as-is; they always work. When
+ * applyThemeVars sets --pj-appBackground etc. on <html>, the browser resolves
+ * the var() to the active theme's value automatically.
+ *
+ * IMPORTANT: Canvas 2D code must NOT use these tokens (canvas cannot resolve
+ * CSS variables). Canvas code calls getActiveThemeColors() from themes.ts to
+ * read the resolved palette strings directly.
+ */
+export const appBackground = 'var(--pj-appBackground, #f0f0f0)' as const;       // canvas area wrapper
+export const shellBackground = 'var(--pj-shellBackground, #fff)' as const;       // EditorSwitcher row
+export const toolbarBackground = 'var(--pj-toolbarBackground, #f5f5f5)' as const; // TopBar rows
+export const toolbarBorder = 'var(--pj-toolbarBorder, #ddd)' as const;           // TopBar bottom border
+export const panelBorder = 'var(--pj-panelBorder, #ddd)' as const;               // panel divider borders
 export const canvasCardBackground = '#fff' as const;      // inline-block card around canvas
 export const canvasCardBorder = '#ccc' as const;          // card border
 export const canvasCardShadow = 'rgba(0,0,0,0.1)' as const; // card drop-shadow
@@ -51,6 +66,16 @@ export const canvasCardShadow = 'rgba(0,0,0,0.1)' as const; // card drop-shadow
 // 2. Canvas — grid & background
 // ---------------------------------------------------------------------------
 
+/**
+ * These tokens are used by NON-canvas code only (e.g. any DOM element that
+ * mirrors a canvas color for visual consistency). Canvas render code always
+ * reads from getActiveThemeColors() — never from these string constants —
+ * because CSS variable syntax breaks Canvas 2D fillStyle.
+ *
+ * At present, these remain static (Classic values) because no DOM element
+ * currently displays them. They are kept here for completeness and to serve
+ * as readable labels if future DOM widgets need them.
+ */
 export const gridLine = '#d0d0d0' as const;              // grid line stroke — unit boundaries (bold)
 export const gridLineSubunit = '#e4e4e4' as const;       // §6.B1 sub-unit grid lines (lighter)
 export const gridBackground = '#f8f8f8' as const;        // canvas clear-fill (background)
@@ -178,7 +203,8 @@ export const paletteItemBorder = '#ccc' as const;
 
 export const btnBackground = '#fff' as const;
 export const btnBorder = '#bbb' as const;
-export const btnText = '#333' as const;   // default button text (also general dark text)
+/** §7.C1 — Themed: default button text (also general dark text). */
+export const btnText = 'var(--pj-btnText, #333)' as const;
 
 // Primary / action buttons (Allocate, Smart Shuffle, Import CSV, etc.)
 export const primaryButtonBackground = '#1565c0' as const;
@@ -235,8 +261,10 @@ export const addStudentButtonText = '#1565c0' as const;
 // 10. Panel & sidebar backgrounds
 // ---------------------------------------------------------------------------
 
-export const sidePanelBackground = '#fafafa' as const;   // left/right side panels
-export const sidePanelHeaderText = '#555' as const;       // uppercase section headers
+/** §7.C1 — Themed: left/right side panel background. */
+export const sidePanelBackground = 'var(--pj-sidePanelBackground, #fafafa)' as const;
+/** §7.C1 — Themed: uppercase section header text inside panels. */
+export const sidePanelHeaderText = 'var(--pj-sidePanelHeaderText, #555)' as const;
 
 // EditorSwitcher tab — active
 export const tabActiveBackground = '#e3f2fd' as const;
@@ -247,8 +275,8 @@ export const tabInactiveBackground = '#fff' as const;
 export const tabInactiveBorder = '#ccc' as const;
 export const tabInactiveText = '#444' as const;
 
-// Pijon logo word-mark in EditorSwitcher
-export const logoText = '#1565c0' as const;
+/** §7.C1 — Themed: Pijon logo word-mark color. */
+export const logoText = 'var(--pj-logoText, #1565c0)' as const;
 
 // Settings popover
 export const settingsPopoverBackground = '#fff' as const;

@@ -112,7 +112,7 @@ import { assignments as classroomAssignments } from '../../domain/classroom.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
 import { usePijonStore } from '../../state/store.js';
 import { useSeatingIssues } from '../../state/hooks.js';
-import { SettingsMenu, GearButton } from '../shell/SettingsMenu.js';
+import { ToggleLever } from '../components/ToggleLever.js';
 
 // ---------------------------------------------------------------------------
 // §13.2 — Allocator registry (drives the split-button dropdown)
@@ -262,8 +262,8 @@ let markerFirstStudent: Student | null = null;
 /** Current preference weight for the assigner mode. Default: -1.0 (avoid). */
 let currentWeight = -1.0;
 
-/** Whether to draw preference links between currently-seated students. */
-let showLinks = false;
+// §7.A3 — showLinks is now read from store.showLinks (via usePijonStore.getState())
+// in paintStudentOverlay. No module-level showLinks variable is needed.
 
 /**
  * §5.B3 — Callback registered by the SidePanel's weight display so the toolbar
@@ -522,7 +522,8 @@ function paintStudentOverlay(
   ctx2d.save();
 
   // ---- Preference links (bottom-most overlay layer) -----
-  if (showLinks) {
+  // §7.A3 — showLinks read from store (shared Settings controls it)
+  if (usePijonStore.getState().showLinks) {
     paintPreferenceLinks(ctx2d, view, classroom);
   }
 
@@ -752,77 +753,7 @@ const AssignerHint: React.FC = () => {
 
 // (WEIGHT_OPTIONS moved to WeightSelector.tsx as WEIGHT_OPTIONS export — §6.A1)
 // (SplitButton removed in §5.B4 — algorithm + variant moved to SettingsMenu; toolbar shows single Allocate button)
-
-// ---------------------------------------------------------------------------
-// §6.A3 — AssignerToggleLever: a clear on/off toggle lever for assigner mode
-// Rendered in the top bar in the same section as the weight selector.
-// ---------------------------------------------------------------------------
-
-/**
- * Toggle lever for assigner mode. Styled clearly with ON/OFF states:
- * - OFF: neutral button with label
- * - ON : filled amber/orange button to signal the mode is active
- */
-const AssignerToggleLever: React.FC<{ on: boolean; onToggle: () => void }> = ({ on, onToggle }) => {
-  return (
-    <button
-      type="button"
-      data-testid="assigner-toggle-lever"
-      aria-pressed={on}
-      onClick={onToggle}
-      title={
-        on
-          ? 'Assigner mode ON — click two students on the canvas to link them. ESC to cancel.'
-          : 'Enable assigner mode to link students by clicking them on the canvas'
-      }
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: '3px 10px',
-        borderRadius: 4,
-        border: `1px solid ${on ? assignerHintBackground : btnBorder}`,
-        background: on ? assignerHintBackground : btnBackground,
-        color: on ? assignerHintText : textDark,
-        cursor: 'pointer',
-        fontSize: '0.82rem',
-        fontWeight: on ? 700 : 400,
-        whiteSpace: 'nowrap',
-        transition: 'background 0.12s, color 0.12s',
-      }}
-    >
-      {/* Lever track + knob for obvious ON/OFF visual */}
-      <span
-        aria-hidden="true"
-        style={{
-          display: 'inline-block',
-          width: 28,
-          height: 14,
-          borderRadius: 7,
-          background: on ? assignerHintText : '#ccc',
-          position: 'relative',
-          transition: 'background 0.12s',
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            display: 'block',
-            width: 10,
-            height: 10,
-            borderRadius: '50%',
-            background: on ? assignerHintBackground : '#888',
-            position: 'absolute',
-            top: 2,
-            left: on ? 16 : 2,
-            transition: 'left 0.12s, background 0.12s',
-          }}
-        />
-      </span>
-      {on ? 'Assigner ON' : 'Assigner'}
-    </button>
-  );
-};
+// (AssignerToggleLever replaced by shared ToggleLever in §7.A1)
 
 // ---------------------------------------------------------------------------
 // §13.8 — SeatingIssuesBanner
@@ -915,18 +846,179 @@ const SeatingIssuesBanner: React.FC = () => {
 };
 
 // ---------------------------------------------------------------------------
-// StudentToolbar — §5.B4 order: Allocate · Clear · Undo/Redo · weights · Export · Import · Settings
+// AllocateSplitButton — §7.A4: split button with dropdown for algorithm + variant
+// ---------------------------------------------------------------------------
+
+/**
+ * §7.A4 — The Allocate split button.
+ * Primary action runs the current algorithm+variant combo.
+ * The dropdown arrow opens a menu to select algorithm (Greedy / Random)
+ * and action variant (Allocate from scratch / Smart Shuffle).
+ */
+const AllocateSplitButton: React.FC<{
+  algorithmId: string;
+  variant: ActionVariant;
+  onRun: () => void;
+  onChangeAlgorithm: (id: string) => void;
+  onChangeVariant: (v: ActionVariant) => void;
+}> = ({ algorithmId, variant, onRun, onChangeAlgorithm, onChangeVariant }) => {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside closes the dropdown
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handler = (e: PointerEvent) => {
+      if (e.target instanceof Node && dropdownRef.current?.contains(e.target)) return;
+      setDropdownOpen(false);
+    };
+    window.addEventListener('pointerdown', handler, { capture: true });
+    return () => { window.removeEventListener('pointerdown', handler, { capture: true }); };
+  }, [dropdownOpen]);
+
+  const primaryBtnStyle: React.CSSProperties = {
+    padding: '4px 10px',
+    borderRadius: '4px 0 0 4px',
+    border: `1px solid ${primaryButtonBorder}`,
+    borderRight: 'none',
+    background: primaryButtonBackground,
+    color: primaryButtonText,
+    cursor: 'pointer',
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+  };
+
+  const arrowBtnStyle: React.CSSProperties = {
+    padding: '4px 6px',
+    borderRadius: '0 4px 4px 0',
+    border: `1px solid ${primaryButtonBorder}`,
+    background: primaryButtonBackground,
+    color: primaryButtonText,
+    cursor: 'pointer',
+    fontSize: '0.72rem',
+    lineHeight: 1,
+  };
+
+  const variantLabel = variant === 'allocate' ? 'Allocate' : 'Shuffle';
+  const algorithmEntry = ALLOCATOR_REGISTRY.find((e) => e.id === algorithmId) ?? ALLOCATOR_REGISTRY[0];
+  const algorithmLabel = algorithmEntry?.label ?? 'Greedy';
+
+  const radioRow: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '4px 12px',
+    cursor: 'pointer',
+    userSelect: 'none',
+    fontSize: '0.8rem',
+  };
+
+  const sectionHeader: React.CSSProperties = {
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    color: textMedium,
+    padding: '6px 12px 2px',
+  };
+
+  return (
+    <div
+      ref={dropdownRef}
+      style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}
+    >
+      {/* Primary action button */}
+      <button
+        type="button"
+        style={primaryBtnStyle}
+        onClick={onRun}
+        data-testid="allocate-btn"
+        title={`${variantLabel} using ${algorithmLabel} algorithm`}
+      >
+        {variantLabel}
+      </button>
+
+      {/* Dropdown toggle arrow */}
+      <button
+        type="button"
+        style={arrowBtnStyle}
+        onClick={() => { setDropdownOpen((v) => !v); }}
+        data-testid="allocate-dropdown-toggle"
+        aria-expanded={dropdownOpen}
+        aria-label="Algorithm and variant options"
+        title="Choose algorithm and action variant"
+      >
+        ▾
+      </button>
+
+      {/* Dropdown menu */}
+      {dropdownOpen && (
+        <div
+          data-testid="allocate-dropdown-menu"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            zIndex: 1100,
+            background: '#fff',
+            border: '1px solid #ccc',
+            borderRadius: 5,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            minWidth: 200,
+            marginTop: 2,
+          }}
+        >
+          {/* Algorithm section */}
+          <div style={sectionHeader}>Algorithm</div>
+          {ALLOCATOR_REGISTRY.map((entry) => (
+            <label key={entry.id} style={radioRow}>
+              <input
+                type="radio"
+                name="allocate-algorithm"
+                value={entry.id}
+                checked={algorithmId === entry.id}
+                onChange={() => { onChangeAlgorithm(entry.id); }}
+                data-testid={`allocate-algorithm-${entry.id}`}
+              />
+              {entry.label}
+            </label>
+          ))}
+
+          <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }} />
+
+          {/* Action variant section */}
+          <div style={sectionHeader}>Action</div>
+          {(['allocate', 'smart_shuffle'] as const).map((v) => (
+            <label key={v} style={radioRow}>
+              <input
+                type="radio"
+                name="allocate-variant"
+                value={v}
+                checked={variant === v}
+                onChange={() => { onChangeVariant(v); setDropdownOpen(false); }}
+                data-testid={`allocate-variant-${v}`}
+              />
+              {v === 'allocate' ? 'Allocate (from scratch)' : 'Smart Shuffle (keep locks)'}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// StudentToolbar — §7.A2 order: Allocate(+dropdown) · Clear · Undo · Redo · weights · Assigner lever · Export · Import
+// (Settings gear moved to TopBar trailing group; "Students" label removed — lever handles that)
 // ---------------------------------------------------------------------------
 
 const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
-  // §5.B4: algorithm id + variant owned by the toolbar, passed into SettingsMenu.
+  // §7.A4: algorithm id + variant owned by the toolbar; drive the split-button dropdown.
   // Default: Greedy algorithm, Allocate variant.
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const [algorithmId, setAlgorithmId] = useState<string>(ALLOCATOR_REGISTRY[0]!.id);
   const [variant, setVariant] = useState<ActionVariant>('allocate');
-
-  // §5.B4: showLinks owned by toolbar, passed into SettingsMenu + drives canvas via module var.
-  const [showLinksState, setShowLinksState] = useState(false);
 
   // §5.B3/6.A1: track active weight in local state so aria-pressed re-renders correctly.
   const [activeWeight, setActiveWeight] = useState(currentWeight);
@@ -934,17 +1026,7 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   // §6.A3 — Assigner toggle lever: moved here from SidePanel.
   const [assignerOn, setAssignerOn] = useState(false);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsAnchorRef = useRef<HTMLDivElement>(null);
-
-  // Keep module-level showLinks in sync with toolbar state
-  useEffect(() => {
-    showLinks = showLinksState;
-    ctx.canvas.requestRepaint();
-  }, [showLinksState, ctx.canvas]);
-
   // §6.A3 — Keep module-level assignerModeActive in sync with toolbar assigner toggle.
-  // Mirrors the effect that was in StudentRosterPanel; moved here for §6.A3.
   useEffect(() => {
     assignerModeActive = assignerOn;
     if (!assignerOn) {
@@ -980,7 +1062,7 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     return entry.factory();
   }, [algorithmId]);
 
-  // §5.B4 — single Allocate button (variant + algorithm chosen via Settings)
+  // §7.A4 — Allocate: uses selected algorithm + variant from the split-button
   const handleRun = useCallback(() => {
     const allocator = makeAllocator();
     if (variant === 'allocate') {
@@ -1033,14 +1115,6 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     void ctx.persistence.openFromFile();
   };
 
-  const handleCloseSettings = useCallback(() => {
-    setSettingsOpen(false);
-  }, []);
-
-  const handleToggleShowLinks = useCallback(() => {
-    setShowLinksState((prev) => !prev);
-  }, []);
-
   const btn: React.CSSProperties = {
     padding: '4px 10px',
     borderRadius: 4,
@@ -1052,18 +1126,6 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   };
 
   const btnDisabled: React.CSSProperties = { ...btn, opacity: 0.45, cursor: 'default' };
-
-  const allocateBtn: React.CSSProperties = {
-    padding: '4px 12px',
-    borderRadius: 4,
-    border: `1px solid ${primaryButtonBorder}`,
-    background: primaryButtonBackground,
-    color: primaryButtonText,
-    cursor: 'pointer',
-    fontSize: '0.82rem',
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-  };
 
   return (
     <>
@@ -1078,20 +1140,14 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           borderBottom: `1px solid ${toolbarBorder}`,
         }}
       >
-        <span style={{ fontWeight: 700, fontSize: '0.88rem', marginRight: 6, color: textDark }}>
-          Students
-        </span>
-
-        {/* §5.B4 — Single Allocate button (replaces SplitButton) */}
-        <button
-          type="button"
-          style={allocateBtn}
-          onClick={handleRun}
-          data-testid="allocate-btn"
-          title={variant === 'allocate' ? 'Assign all students to desks from scratch' : 'Re-seat respecting preferences (locked seats stay)'}
-        >
-          Allocate
-        </button>
+        {/* §7.A4 — Allocate split button: primary action + algorithm/variant dropdown */}
+        <AllocateSplitButton
+          algorithmId={algorithmId}
+          variant={variant}
+          onRun={handleRun}
+          onChangeAlgorithm={setAlgorithmId}
+          onChangeVariant={setVariant}
+        />
 
         <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
 
@@ -1135,10 +1191,22 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
           }}
         />
 
-        {/* §6.A3 — Assigner-mode toggle lever (same section as weight selector) */}
-        <AssignerToggleLever
+        {/* §7.A1 — Assigner-mode toggle lever (reuses shared ToggleLever) */}
+        <ToggleLever
+          labelOff="Assigner"
+          labelOn="Assigner ON"
           on={assignerOn}
           onToggle={() => { setAssignerOn((prev) => !prev); }}
+          activeBackground="#ff6f00"
+          activeColor="#fff"
+          activeBorderColor="#e65100"
+          testId="assigner-toggle-lever"
+          ariaPressed={assignerOn}
+          title={
+            assignerOn
+              ? 'Assigner mode ON — click two students on the canvas to link them. ESC to cancel.'
+              : 'Enable assigner mode to link students by clicking them on the canvas'
+          }
         />
 
         <span style={{ borderLeft: `1px solid ${divider}`, height: 20, margin: '0 2px' }} />
@@ -1169,22 +1237,6 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 
         {/* §13.6 — Assigner hint banner (appears when first student is selected) */}
         <AssignerHint />
-
-        {/* §13.3 Settings gear button + popover (§13.4 Nearness, §13.5 Violations, §5.B4 Algorithm/Variant/ShowLinks) */}
-        <div ref={settingsAnchorRef} style={{ position: 'relative', marginLeft: 'auto' }}>
-          <GearButton open={settingsOpen} onClick={() => { setSettingsOpen((prev) => !prev); }} />
-          <SettingsMenu
-            ctx={ctx}
-            open={settingsOpen}
-            onClose={handleCloseSettings}
-            algorithmId={algorithmId}
-            onChangeAlgorithm={setAlgorithmId}
-            variant={variant}
-            onChangeVariant={setVariant}
-            showLinks={showLinksState}
-            onToggleShowLinks={handleToggleShowLinks}
-          />
-        </div>
       </div>
 
       {/* §13.8 — Seating issues banner: shown below toolbar, non-blocking, live */}
@@ -2085,7 +2137,7 @@ export const StudentEditor: EditorMode = {
     // (deactivate also resets these, but activate is the definitive guard against
     // any edge-case where deactivate didn't run cleanly before a re-activate.)
     assignerModeActive = false;
-    showLinks = false;
+    // §7.A3 — showLinks lives in store; nothing to reset here.
     currentWeight = -1.0;
     // Wire the pulse repaint fn from the incoming context.
     pulseRepaintFn = () => { ctx.canvas.requestRepaint(); };
@@ -2108,10 +2160,7 @@ export const StudentEditor: EditorMode = {
     // §13.6: stop the pulse loop on deactivate — no leak to next editor
     stopPulseLoop();
     pulseRepaintFn = null;
-    // Reset showLinks so it matches the toolbar's fresh useState(false) on re-mount.
-    // Without this, toggling showLinks ON then switching editors and back would leave
-    // the overlay rendering but the toolbar button showing the wrong state.
-    showLinks = false;
+    // §7.A3 — showLinks lives in store; nothing to reset here.
     // Notify the React component to reset its toggle state
     if (setAssignerModeCallback !== null) {
       setAssignerModeCallback(false);

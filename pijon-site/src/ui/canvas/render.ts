@@ -39,9 +39,6 @@ import { furnitureToPixelRect } from './hitTest.js';
 import { getImage } from './imageCache.js';
 import { furnitureAssetUrl } from '../../assets/paths.js';
 import {
-  gridLine,
-  gridLineSubunit,
-  gridBackground,
   furnitureFillSingleDesk,
   furnitureFillTable,
   furnitureFillTeacherDesk,
@@ -52,6 +49,7 @@ import {
   occupantNameFixture,
   lockTint,
 } from '../../theme/colors.js';
+import { getActiveThemeColors } from '../../theme/themes.js';
 
 // ---------------------------------------------------------------------------
 // clearCanvas
@@ -66,7 +64,9 @@ export function clearCanvas(
   cssW: number,
   cssH: number,
 ): void {
-  ctx.fillStyle = gridBackground;
+  // Use the active theme's resolved gridBackground (not a CSS var string —
+  // canvas cannot resolve CSS variables at paint time).
+  ctx.fillStyle = getActiveThemeColors().gridBackground;
   ctx.fillRect(0, 0, cssW, cssH);
 }
 
@@ -165,15 +165,18 @@ export function drawGrid(
   // G=1 → only tier 0; G=2 → tiers 0 and 1; G=4 → tiers 0, 1, and 2.
   const maxTier = cellsPerUnit >= 4 ? 2 : cellsPerUnit >= 2 ? 1 : 0;
 
-  // Unit-boundary color (can be overridden by caller, e.g. classroom.gridColor)
-  const unitColor = color ?? gridLine;
+  // Unit-boundary color (can be overridden by caller, e.g. classroom.gridColor).
+  // Use the active theme's resolved gridLine (not a CSS var — canvas cannot
+  // resolve CSS variables at paint time).
+  const themeColors = getActiveThemeColors();
+  const unitColor = color ?? themeColors.gridLine;
 
   ctx.save();
 
   for (let tier = 0; tier <= maxTier; tier++) {
-    // Sub-unit lines use the lighter gridLineSubunit token.
+    // Sub-unit lines use the lighter gridLineSubunit from the active theme.
     // Tier 0 (unit boundary) always uses the main gridLine / custom color.
-    ctx.strokeStyle = tier === 0 ? unitColor : gridLineSubunit;
+    ctx.strokeStyle = tier === 0 ? unitColor : themeColors.gridLineSubunit;
     ctx.lineWidth = TIER_LINE_WIDTH[tier] ?? 0.3;
     ctx.beginPath();
 
