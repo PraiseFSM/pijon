@@ -119,8 +119,10 @@ to the furniture tool and your seating is still there.
 ```
 
 There is **one top bar** (no separate switcher row). It holds, left to right: the **logo**, the
-**Furniture/Students lever** (a toggle that switches editors), then the active editor's controls, a
-flexible **gap**, then the shared trailing group: **Settings (⚙)**, the **"saved locally"** status, and
+**Furniture/Students lever** (a toggle that switches editors — rendered as **`Furniture [lever] Students`**
+with a label on **each side** of the lever, like a physical switch, rather than one label that changes),
+then the active editor's controls, a flexible **gap**, then the shared trailing group (on its own
+`topBarRight` surface, set off by a divider): **Settings (⚙)**, the **"saved locally"** status, and
 **Erase all**. Switching the lever swaps the editor's controls and the **left side panel**; the **grid
 stays put**, with all furniture and seating intact. Everything autosaves as you go. Pijon uses a
 **single left panel** — in the Students editor the roster sits on the left, and selecting a student
@@ -131,7 +133,9 @@ The top bar's middle section is per editor:
 - **Students mode:** Allocate (with an algorithm dropdown) · Clear · Undo · Redo · weight selector
   (−2 −1 +1 +2) · Assigner lever · Export · Import.
 
-Settings, the saved-status indicator, and Erase all are **shared and identical in both modes**.
+Settings, the saved-status indicator, and Erase all are **shared and identical in both modes**. The
+**top bar and the left panel keep a constant size across editor modes** — switching tools swaps their
+*contents*, never their dimensions, so the layout never jumps.
 
 ---
 
@@ -161,8 +165,11 @@ specifies exactly how each template is realized in code.
 ## Feature Areas
 
 **Classroom building** — resize the grid (add / delete rows & columns) via **+ / − buttons** drawn in
-a ghost ring around the grid; place / move / delete furniture; furniture palette; (later) rotate,
-multi-seat tables, custom images. Constraints that keep resizing sane:
+a ghost ring around the grid; place / move / delete furniture; furniture palette (which **fills the full
+height** of the left panel). **Import furniture:** at the bottom of the furniture left panel — mirroring
+the roster's Import-CSV placement — the teacher can **upload an image and choose its cell size (X × Y
+units)**; it becomes a placeable palette item rendered from that image at that footprint (stored with the
+project, local-first). (Later: rotate, multi-seat tables.) Constraints that keep resizing sane:
 - The **minimum placeable area is 3×3 units** (measured in real units, so the floor scales with
   granularity); the grid can never be shrunk below it.
 - A **− (remove) button is hidden at any edge where removing would be invalid** — because furniture
@@ -174,7 +181,8 @@ multi-seat tables, custom images. Constraints that keep resizing sane:
   boldest; each finer subdivision is drawn thinner (so at G=2 the half-unit lines are lighter, and at
   G=4 the quarter-unit lines lighter still). This keeps the underlying unit grid legible as cells densify.
 - **Scroll-wheel zoom:** the wheel zooms the grid larger/smaller (changes the on-screen size only, not
-  the classroom's units or furniture's real size).
+  the classroom's units or furniture's real size). It works **anywhere in the area behind the grid** —
+  the whole page except the top bar and left panel — not just directly over the grid.
 
 **Grid granularity** — finer cell density for more precise furniture placement *without* changing
 furniture's real size. Granularity is restricted to **1, 2, or 4** (powers of two, so every change is
@@ -234,13 +242,39 @@ the selected weight) or drag/seat interactions. All student↔student preference
   recolors **live** as you drag within the picker.
 - A single **colors file** controls every non-image color in the app (buttons, backgrounds, menu
   bars, windows, panels) so the whole UI can be re-themed from one place.
-- **Color themes.** Pijon ships selectable themes (chosen in Settings) and is built so **adding another
-  theme is easy** — a theme is just a named set of color values; the rest of the UI reads colors
-  through the theme, never hardcoded. Ships with at least:
-  - **Theme 1 — "Classic" (default):** the current light look (white surfaces; furniture-style fills).
-  - **Theme 2 — "Purple/Green":** the area *behind* the placer grid (not the grid itself) `#939598`,
-    the top bar `#84659a`, the left panel `#48765d`.
-  The theme system should make a third/fourth theme a matter of adding one more named palette.
+- **Color schemes.** Pijon ships selectable color schemes (chosen in Settings) and is built so **adding
+  another scheme is trivial — each scheme is its own data file** (e.g. `.json`) in a schemes folder; the
+  rest of the UI reads colors through the active scheme, never hardcoded. A scheme is a named set of
+  values, including at least:
+  - **`topBar`**, **`leftBar`**, **`gridBackdrop`** (the area *behind* the placer grid, not the grid
+    itself) — the major surfaces.
+  - **`text`** — the color of all **ordinary** (non-special) text (Settings menu, labels, etc.).
+  - **`buttonText`** — the color of **button text**, configurable independently of `text` (so buttons
+    stay legible on their own backgrounds per scheme).
+  - **`studentName`** — the color of **students' names drawn on the grid** (canvas), configurable
+    independently of `text` (it reads better as its own color — **black** in both shipped schemes).
+  - **`gridBackground`** — the fill **inside the grid itself** (behind the cells), configurable —
+    **white** in both shipped schemes (distinct from `gridBackdrop`, the area *around* the grid).
+  - **`selectedBox`** — the **selection / active accent** color (selected furniture, active toggles,
+    drag previews, highlights — everything that is "blue" in Classic). Configurable per scheme.
+  - **`unselectedBox`** — the **base box / unselected surface** color (the "white" boxes). Configurable.
+  - **`topBarRight`** — the background of the **right end of the top bar** (the trailing cluster:
+    Settings · Saved-locally · Erase all), separated from the rest of the bar by a **divider** and
+    configurable on its own (with a matching **`topBarRightText`** for legible text/icons on that
+    surface). The **Erase all** and **"Saved locally"** controls themselves have **transparent**
+    backgrounds (they sit on the `topBarRight` surface). (This replaces the old fixed `#553726` brown
+    backgrounds.)
+  - **`logo`** — a **filepath to an image** that replaces the "Pijon" wordmark in the top-left; when
+    `logo` is `null`, the literal text "Pijon" is shown.
+- **The Settings menu is themed:** its **header** (the "Settings" title strip) takes the **`topBar`**
+  color, its **body** takes the **`gridBackdrop`** color, and its text uses the scheme **`text`** color.
+
+  Ships with two schemes: **"Classic" (default)** — the current light look (`selectedBox` blue,
+  `unselectedBox` white, `studentName` black, `gridBackground` white) — and **"Purple/Green"** —
+  `gridBackdrop` `#939598`, `topBar` `#84659a`, `leftBar` `#48765d`, `selectedBox` `#793498`,
+  `unselectedBox` `#371e42`, `studentName` black, `gridBackground` white. Adding a third scheme is just
+  dropping in one more scheme file. (Schemes drive DOM via CSS variables and the canvas via a resolved
+  palette, since Canvas 2D can't read CSS variables.)
 
 **Saving & sharing** — autosave; save/open a project file the teacher controls; export an
 arrangement (and later, print / export to image or PDF).

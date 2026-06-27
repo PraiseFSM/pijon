@@ -37,7 +37,7 @@ import { create } from 'zustand';
 import type { FurnitureId, Vec2, StudentId } from '../domain/types.js';
 import { furnitureId, studentId } from '../domain/types.js';
 import type { ThemeId } from '../theme/themes.js';
-import { THEMES, DEFAULT_THEME_ID, _setActiveThemeInternal, applyThemeVars } from '../theme/themes.js';
+import { THEMES, DEFAULT_THEME_ID, _setActiveThemeInternal, applyThemeVars, isValidThemeId } from '../theme/themes.js';
 import type { Student } from '../domain/student.js';
 import {
   makeStudent,
@@ -54,6 +54,7 @@ import type { Furniture } from '../domain/furniture.js';
 import { assignOccupant, vacate, capacity, isFixture } from '../domain/furniture.js';
 import type { Classroom } from '../domain/classroom.js';
 import type { GridEdge } from '../domain/classroom.js';
+import type { CustomFurnitureDef } from '../domain/classroom.js';
 import {
   makeClassroom,
   addFurniture as domainAddFurniture,
@@ -68,6 +69,8 @@ import {
   setThreshold as domainSetThreshold,
   setBackgroundImage as domainSetBackgroundImage,
   setGridColor as domainSetGridColor,
+  addCustomFurnitureDef as domainAddCustomFurnitureDef,
+  removeCustomFurnitureDef as domainRemoveCustomFurnitureDef,
 } from '../domain/classroom.js';
 import { SeatGraph } from '../domain/seatGraph.js';
 import type { Allocator } from '../domain/allocators/types.js';
@@ -146,7 +149,7 @@ export function readPersistedTheme(): ThemeId {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
     if (raw === null) return DEFAULT_THEME_ID;
     // Validate: only accept ids that exist in the THEMES registry
-    if (raw in THEMES) return raw as ThemeId;
+    if (isValidThemeId(raw)) return raw;
     return DEFAULT_THEME_ID;
   } catch {
     return DEFAULT_THEME_ID;
@@ -571,6 +574,23 @@ export interface PijonActions {
    * Marks dirty.
    */
   removeStudent(studentId: StudentId): void;
+
+  // -- §8.C1 Custom palette --
+
+  /**
+   * Append a custom furniture palette entry (teacher-imported image).
+   * The def carries a data URL (local, from FileReader) — no network.
+   * Marks the project dirty for autosave.
+   */
+  addCustomFurnitureDef(def: CustomFurnitureDef): void;
+
+  /**
+   * Remove a custom palette entry by its id.
+   * Also removes any placed furniture pieces that reference this def's imageUrl
+   * via their imageUrl field. Marks dirty.
+   * No-op when the id is not found.
+   */
+  removeCustomFurnitureDef(defId: string): void;
 }
 
 export type PijonStore = PijonState & PijonActions;
@@ -670,14 +690,40 @@ function applyArrangement(
 // Store
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// §12.A2 — Sync _activeTheme to the persisted theme at store-init time.
+//
+// Problem: _activeTheme in themes.ts is initialized to THEMES[DEFAULT_THEME_ID]
+// (classic) at module load.  The store reads readPersistedTheme() for the
+// initial themeId value, but never called _setActiveThemeInternal() for the
+// persisted theme, so the CANVAS palette stayed classic until the user toggled.
+//
+// Fix: compute the persisted id once here (synchronously, before the store
+// object is created) and immediately sync both the canvas palette cache AND
+// the DOM CSS vars.  This runs at module-import time — before any React render
+// — so getActiveThemeColors() returns the correct palette on the very first
+// canvas paint.
+//
+// Circular-import safety: themes.ts does NOT import store.ts; store.ts imports
+// from themes.ts (already done above).  Calling _setActiveThemeInternal and
+// applyThemeVars from store.ts is safe in that direction.
+// ---------------------------------------------------------------------------
+const _initPersistedThemeId = readPersistedTheme();
+const _initPalette = THEMES[_initPersistedThemeId];
+if (_initPalette !== undefined) {
+  _setActiveThemeInternal(_initPalette);
+  applyThemeVars(_initPalette);
+}
+
 export const usePijonStore = create<PijonStore>()((set, get) => ({
   ...EMPTY_STATE,
   // §7.B1: Override the placeholder uiScale with the persisted value read
   // from localStorage here (inside create(), so jsdom is ready in tests).
   uiScale: readPersistedUiScale(),
-  // §7.C1: Override the placeholder themeId with the persisted value read
-  // from localStorage (same deferred pattern as uiScale).
-  themeId: readPersistedTheme(),
+  // §7.C1 / §12.A2: Override the placeholder themeId with the persisted value.
+  // _activeTheme is already synced above (module-level) so the CANVAS palette
+  // is correct from the very first paint — no toggle required.
+  themeId: _initPersistedThemeId,
 
   // ---- Lifecycle -----------------------------------------------------------
 
@@ -1195,6 +1241,8 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
 
   setTheme(id: ThemeId) {
     const palette = THEMES[id];
+    // Guard: id must be a registered scheme; skip silently if not found
+    if (palette === undefined) return;
     // Update the module-level canvas palette cache
     _setActiveThemeInternal(palette);
     // Apply CSS custom properties to the DOM
@@ -1280,6 +1328,40 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
         selectedStudentId: newSelectedId,
         saveStatus: 'dirty',
       };
+    });
+  },
+
+  // §8.C1 — Custom palette actions
+
+  addCustomFurnitureDef(def: CustomFurnitureDef) {
+    set((s) => ({
+      classroom: domainAddCustomFurnitureDef(s.classroom, def),
+      saveStatus: 'dirty',
+    }));
+  },
+
+  removeCustomFurnitureDef(defId: string) {
+    set((s) => {
+      // Remove the palette entry
+      const newClassroom = domainRemoveCustomFurnitureDef(s.classroom, defId);
+      // Also remove any placed 'custom' furniture pieces that used this def's imageUrl.
+      // We identify them by matching the defId stored in their imageUrl field —
+      // actually we match furniture whose kind === 'custom' AND whose imageUrl matches
+      // the def's imageUrl. Since defId is in the palette we look it up first.
+      const removedDef = (s.classroom.customPalette ?? []).find((d) => d.id === defId);
+      if (removedDef === undefined) {
+        // Def not found — no-op
+        if (newClassroom === s.classroom) return {};
+        return { classroom: newClassroom, saveStatus: 'dirty' as const };
+      }
+      // Filter out placed furniture with this imageUrl
+      const filteredFurniture = newClassroom.furniture.filter(
+        (f) => !(f.kind === 'custom' && f.imageUrl === removedDef.imageUrl),
+      );
+      const finalClassroom = filteredFurniture.length !== newClassroom.furniture.length
+        ? { ...newClassroom, furniture: filteredFurniture }
+        : newClassroom;
+      return { classroom: finalClassroom, saveStatus: 'dirty' as const };
     });
   },
 }));

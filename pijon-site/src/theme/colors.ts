@@ -62,6 +62,30 @@ export const canvasCardBackground = '#fff' as const;      // inline-block card a
 export const canvasCardBorder = '#ccc' as const;          // card border
 export const canvasCardShadow = 'rgba(0,0,0,0.1)' as const; // card drop-shadow
 
+/**
+ * §8.B2 — Themed ordinary text color.
+ * Driven by the active scheme's `text` value via CSS var --pj-text.
+ * Use this for all non-special text across the UI.
+ * Classic fallback: #333.
+ */
+export const text = 'var(--pj-text, #333)' as const;
+
+/**
+ * §11.A4 — Top-bar right cluster (Settings · Saved-locally · Erase all) background.
+ * Driven by the active scheme's `topBarRight` value via CSS var --pj-topBarRight.
+ * Classic fallback: #f5f5f5 (= classic topBar, so it blends in by default).
+ */
+export const topBarRightBackground = 'var(--pj-topBarRight, #f5f5f5)' as const;
+
+/**
+ * §11.A5 — Text color for elements inside the top-bar-right region.
+ * Driven by the active scheme's `topBarRightText` value via CSS var --pj-topBarRightText.
+ * Legible on `topBarRight` in BOTH schemes.
+ * Classic = #333 (12.6:1 on #f5f5f5). PurpleGreen = #ffffff (4.87:1 on #84659a, ≥ WCAG AA).
+ * Classic fallback: #333.
+ */
+export const topBarRightText = 'var(--pj-topBarRightText, #333)' as const;
+
 // ---------------------------------------------------------------------------
 // 2. Canvas — grid & background
 // ---------------------------------------------------------------------------
@@ -119,6 +143,11 @@ export const lockTint = 'rgba(255, 152, 0, 0.18)' as const;   // orange tint ove
 // ---------------------------------------------------------------------------
 
 // Drag-between-desks
+// §10.A3 — These canvas tokens are STATIC FALLBACKS only.
+// Canvas paintOverlay() code must NOT use these directly; instead call
+//   rgbaFromHex(getActiveThemeColors().selectedBox, alpha)
+// at draw time so the accent is scheme-aware (purple on purpleGreen, blue on classic).
+// The constants are kept here for DOM-side usage and test assertions on the token shape.
 export const dragTargetFill = 'rgba(21, 101, 192, 0.22)' as const;
 export const dragTargetStroke = 'rgba(21, 101, 192, 0.9)' as const;
 export const dragSourceFade = 'rgba(200, 200, 200, 0.5)' as const;
@@ -166,14 +195,18 @@ export const prefLinkAvoid = 'rgba(183, 28, 28, 0.55)' as const;    // red — a
 // ---------------------------------------------------------------------------
 
 // Selection dashed ring
+// §10.A3 — STATIC FALLBACK only; canvas paintOverlay derives live value from
+//   rgbaFromHex(getActiveThemeColors().selectedBox, 0.9)
 export const selectionStroke = 'rgba(25, 118, 210, 0.9)' as const;
 
 // Drag preview — valid vs. invalid
+// §10.A3 — STATIC FALLBACK only (same note as selectionStroke above).
 export const dragPreviewValidStroke = 'rgba(25, 118, 210, 0.85)' as const;
 export const dragPreviewInvalidFill = 'rgba(211, 47, 47, 0.28)' as const;
 export const dragPreviewInvalidStroke = 'rgba(211, 47, 47, 0.85)' as const;
 
 // Grid-drag (existing furniture) — valid vs. invalid
+// §10.A3 — STATIC FALLBACK only (same note as selectionStroke above).
 export const gridDragValidStroke = 'rgba(25, 118, 210, 0.9)' as const;  // same as selection
 export const gridDragInvalidFill = 'rgba(211, 47, 47, 0.30)' as const;
 export const gridDragInvalidStroke = 'rgba(211, 47, 47, 0.9)' as const;
@@ -201,19 +234,27 @@ export const paletteItemBorder = '#ccc' as const;
 // 9. Toolbar & button shared styles
 // ---------------------------------------------------------------------------
 
-export const btnBackground = '#fff' as const;
+// §10.A4 — unselectedBox for base button surface
+export const btnBackground = 'var(--pj-unselectedBox, #ffffff)' as const;
 export const btnBorder = '#bbb' as const;
-/** §7.C1 — Themed: default button text (also general dark text). */
-export const btnText = 'var(--pj-btnText, #333)' as const;
+/**
+ * §11.A1 — Button text color, independently configurable per scheme.
+ * Routes through --pj-buttonText (set by applyThemeVars from scheme.buttonText).
+ * Classic fallback: #333. PurpleGreen: #f0e8f5 (near-white for legibility on dark buttons).
+ * Note: --pj-btnText is kept in sync (set to the same palette value) for back-compat.
+ */
+export const btnText = 'var(--pj-buttonText, #333)' as const;
 
 // Primary / action buttons (Allocate, Smart Shuffle, Import CSV, etc.)
-export const primaryButtonBackground = '#1565c0' as const;
-export const primaryButtonBorder = '#1565c0' as const;
+// §10.A3 — selectedBox accent (DOM tokens route through CSS var)
+export const primaryButtonBackground = 'var(--pj-selectedBox, #1565c0)' as const;
+export const primaryButtonBorder = 'var(--pj-selectedBox, #1565c0)' as const;
 export const primaryButtonText = '#fff' as const;
 
 // Active/toggled button
-export const activeButtonBackground = '#1565c0' as const;
-export const activeButtonBorder = '#1565c0' as const;
+// §10.A3 — selectedBox accent
+export const activeButtonBackground = 'var(--pj-selectedBox, #1565c0)' as const;
+export const activeButtonBorder = 'var(--pj-selectedBox, #1565c0)' as const;
 export const activeButtonText = '#fff' as const;
 
 // Danger / remove buttons (× remove, Erase all)
@@ -227,17 +268,21 @@ export const eraseButtonText = '#b71c1c' as const;
 
 // Gear / settings button
 export const gearButtonBorder = '#bbb' as const;
-export const gearButtonBorderActive = '#1565c0' as const;
-export const gearButtonBackground = '#fff' as const;
+// §10.A3 — selectedBox accent for active state
+export const gearButtonBorderActive = 'var(--pj-selectedBox, #1565c0)' as const;
+// §10.A4 — unselectedBox for inactive background
+export const gearButtonBackground = 'var(--pj-unselectedBox, #ffffff)' as const;
 export const gearButtonBackgroundActive = '#e3f2fd' as const;
 export const gearButtonText = '#555' as const;
-export const gearButtonTextActive = '#1565c0' as const;
+// §10.A3 — selectedBox accent for active text
+export const gearButtonTextActive = 'var(--pj-selectedBox, #1565c0)' as const;
 
 // Split-button (§13.2) caret divider
 export const splitButtonCaretDivider = 'rgba(255,255,255,0.35)' as const;
 export const splitButtonDropdownBorder = '#c5cae9' as const;
 export const splitButtonDropdownShadow = 'rgba(0,0,0,0.15)' as const;
-export const splitButtonDropdownBackground = '#fff' as const;
+// §10.A4 — unselectedBox for dropdown surface
+export const splitButtonDropdownBackground = 'var(--pj-unselectedBox, #ffffff)' as const;
 export const splitButtonSectionLabel = '#888' as const;
 
 // Disabled button
@@ -246,7 +291,8 @@ export const disabledButtonBackground = '#eee' as const;
 
 // Roster item — selected highlight
 export const rosterSelectedBackground = '#e3f2fd' as const;
-export const rosterSelectedBorder = '#1565c0' as const;
+// §10.A3 — selectedBox accent
+export const rosterSelectedBorder = 'var(--pj-selectedBox, #1565c0)' as const;
 
 // Roster item — preference count badge
 export const prefCountBadgeBackground = '#f0f0f0' as const;
@@ -255,7 +301,8 @@ export const prefCountBadgeText = '#888' as const;
 // Add-student form button
 export const addStudentButtonBorder = '#90caf9' as const;
 export const addStudentButtonBackground = '#e3f2fd' as const;
-export const addStudentButtonText = '#1565c0' as const;
+// §10.A3 — selectedBox accent for button text
+export const addStudentButtonText = 'var(--pj-selectedBox, #1565c0)' as const;
 
 // ---------------------------------------------------------------------------
 // 10. Panel & sidebar backgrounds
@@ -266,33 +313,38 @@ export const sidePanelBackground = 'var(--pj-sidePanelBackground, #fafafa)' as c
 /** §7.C1 — Themed: uppercase section header text inside panels. */
 export const sidePanelHeaderText = 'var(--pj-sidePanelHeaderText, #555)' as const;
 
-// EditorSwitcher tab — active
+// EditorSwitcher tab — active (used by the Furniture/Students ToggleLever in TopBar)
 export const tabActiveBackground = '#e3f2fd' as const;
-export const tabActiveBorder = '#1565c0' as const;
+// §10.A3 — selectedBox accent
+export const tabActiveBorder = 'var(--pj-selectedBox, #1565c0)' as const;
 export const tabActiveText = '#0d47a1' as const;
-// EditorSwitcher tab — inactive
-export const tabInactiveBackground = '#fff' as const;
-export const tabInactiveBorder = '#ccc' as const;
-export const tabInactiveText = '#444' as const;
 
-/** §7.C1 — Themed: Pijon logo word-mark color. */
+/**
+ * §7.C1 / §10.A3 — Themed: Pijon logo word-mark color.
+ * Routes through --pj-logoText (set from scheme.text by applyThemeVars),
+ * with selectedBox as a secondary fallback for Classic appearance.
+ */
 export const logoText = 'var(--pj-logoText, #1565c0)' as const;
 
-// Settings popover
+// Settings popover — §10.A2: body background uses appBackground (gridBackdrop), set in SettingsMenu
+// This token is kept as a fallback for non-settings popovers that share it.
 export const settingsPopoverBackground = '#fff' as const;
 export const settingsPopoverBorder = '#ccc' as const;
 export const settingsPopoverShadow = 'rgba(0,0,0,0.15)' as const;
-export const settingsHeaderText = '#555' as const;
-export const settingsLabelText = '#333' as const;
+// §10.A2 — Settings header + label text route through themed text token
+export const settingsHeaderText = 'var(--pj-text, #555)' as const;
+export const settingsLabelText = 'var(--pj-text, #333)' as const;
 
 // Context menu (StudentEditor)
-export const contextMenuBackground = '#fff' as const;
+// §10.A4 — unselectedBox for menu surface
+export const contextMenuBackground = 'var(--pj-unselectedBox, #ffffff)' as const;
 export const contextMenuBorder = '#ccc' as const;
 export const contextMenuShadow = 'rgba(0,0,0,0.15)' as const;
 export const contextMenuHeaderText = '#333' as const;
 export const contextMenuMutedText = '#888' as const;
 export const contextMenuLockText = '#e65100' as const;
-export const contextMenuUnlockText = '#1565c0' as const;
+// §10.A3 — selectedBox accent
+export const contextMenuUnlockText = 'var(--pj-selectedBox, #1565c0)' as const;
 
 // Preference direction colors (preference list in right panel)
 export const prefPreferText = '#2e7d32' as const;   // green — prefer
@@ -300,7 +352,8 @@ export const prefAvoidText = '#c62828' as const;    // red — avoid
 
 // Selected student header in right panel
 export const selectedStudentHeaderBackground = '#e3f2fd' as const;
-export const selectedStudentHeaderText = '#1565c0' as const;
+// §10.A3 — selectedBox accent
+export const selectedStudentHeaderText = 'var(--pj-selectedBox, #1565c0)' as const;
 
 // Preference panel border highlight
 export const prefPanelAddBorder = '#e3f2fd' as const;
@@ -337,13 +390,24 @@ export const bannerAmberText = '#e65100' as const;
 // 12. Typography & dividers
 // ---------------------------------------------------------------------------
 
-export const textDark = '#333' as const;
-export const textMedium = '#555' as const;
-export const textMuted = '#666' as const;
-export const textFaint = '#777' as const;
-export const textFainter = '#888' as const;
-export const textPlaceholder = '#999' as const;
-export const textDisabled = '#aaa' as const;
+/** §8.B2 — Primary text: themed via --pj-text (driven by scheme.text). Classic fallback: #333. */
+export const textDark = 'var(--pj-text, #333)' as const;
+/**
+ * §8.B2 — Secondary/muted text hierarchy.
+ * All six tiers are derived from the scheme text color via --pj-text-muted /
+ * --pj-text-faint so they stay legible in dark-surface themes (e.g. purpleGreen
+ * where text=#fff). Hardcoded grey fallbacks reproduce the Classic appearance.
+ *
+ * textMedium / textMuted   → --pj-text-muted  (text @ 70% opacity)
+ * textFaint / textFainter  → --pj-text-faint   (text @ 45% opacity)
+ * textPlaceholder / textDisabled → --pj-text-faint (lightest tier)
+ */
+export const textMedium = 'var(--pj-text-muted, #555)' as const;
+export const textMuted = 'var(--pj-text-muted, #666)' as const;
+export const textFaint = 'var(--pj-text-faint, #777)' as const;
+export const textFainter = 'var(--pj-text-faint, #888)' as const;
+export const textPlaceholder = 'var(--pj-text-faint, #999)' as const;
+export const textDisabled = 'var(--pj-text-faint, #aaa)' as const;
 
 // Fixture item in roster (italic purple)
 export const fixtureItemText = '#9c27b0' as const;
@@ -404,7 +468,8 @@ export const ghostRingMinusButtonText = 'rgba(180, 60, 60, 0.80)' as const;
 export const ghostRingMinusButtonHoverFill = 'rgba(180, 60, 60, 0.20)' as const;
 
 /** Popover chrome that wraps the <input type="color"> + swatch palette. */
-export const colorPickerPopoverBackground = '#fff' as const;
+// §10.A4 — unselectedBox for popover surface
+export const colorPickerPopoverBackground = 'var(--pj-unselectedBox, #ffffff)' as const;
 export const colorPickerPopoverBorder = '#ccc' as const;
 export const colorPickerPopoverShadow = 'rgba(0,0,0,0.18)' as const;
 export const colorPickerHeaderText = '#555' as const;

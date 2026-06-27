@@ -23,6 +23,28 @@ import { studentId } from './types.js';
 import { occupant } from './furniture.js';
 
 // ---------------------------------------------------------------------------
+// §8.C1 — Custom palette definition
+// ---------------------------------------------------------------------------
+
+/**
+ * A custom furniture palette entry created by the teacher via image import.
+ * Stored classroom-level so it persists with the project file.
+ *
+ * - id:       stable uuid, used as a drag token and to correlate palette items.
+ * - name:     label shown in the palette (teacher-provided or derived from filename).
+ * - imageUrl: data URL from FileReader.readAsDataURL — local-only, no network.
+ * - wUnits:   width in classroom UNITS (placed furniture gets wUnits * cellsPerUnit cells).
+ * - hUnits:   height in classroom UNITS.
+ */
+export interface CustomFurnitureDef {
+  readonly id: string;
+  readonly name: string;
+  readonly imageUrl: string;
+  readonly wUnits: number;
+  readonly hUnits: number;
+}
+
+// ---------------------------------------------------------------------------
 // Classroom interface
 // ---------------------------------------------------------------------------
 
@@ -62,6 +84,13 @@ export interface Classroom {
    * Persisted in the project file (ClassroomGeometrySchema).
    */
   readonly gridColor?: string | null;
+  /**
+   * §8.C1 — Teacher-imported custom furniture palette.
+   * Each entry defines a placeable palette item backed by an image (data URL).
+   * Empty by default; new entries are appended via addCustomFurnitureDef.
+   * Persisted in the project file so the palette survives save/load cycles.
+   */
+  readonly customPalette?: readonly CustomFurnitureDef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +110,30 @@ export function makeClassroom(
   cellsPerUnit: number = DEFAULT_CELLS_PER_UNIT,
   thresholdUnits: number = DEFAULT_THRESHOLD_UNITS,
 ): Classroom {
-  return { id, name, gridW, gridH, furniture: [], cellsPerUnit, thresholdUnits, backgroundImage: null, gridColor: null };
+  return { id, name, gridW, gridH, furniture: [], cellsPerUnit, thresholdUnits, backgroundImage: null, gridColor: null, customPalette: [] };
+}
+
+// ---------------------------------------------------------------------------
+// §8.C1 — Custom palette mutations
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a new Classroom with `def` appended to the custom palette.
+ * Does not check for duplicate ids — callers should use crypto.randomUUID().
+ */
+export function addCustomFurnitureDef(c: Classroom, def: CustomFurnitureDef): Classroom {
+  return { ...c, customPalette: [...(c.customPalette ?? []), def] };
+}
+
+/**
+ * Return a new Classroom with the custom palette entry matching `defId` removed.
+ * No-op (returns same reference) when the id is not found.
+ */
+export function removeCustomFurnitureDef(c: Classroom, defId: string): Classroom {
+  const palette = c.customPalette ?? [];
+  const next = palette.filter((d) => d.id !== defId);
+  if (next.length === palette.length) return c; // nothing removed
+  return { ...c, customPalette: next };
 }
 
 /**

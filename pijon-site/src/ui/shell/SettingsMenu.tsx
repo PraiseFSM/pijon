@@ -33,10 +33,9 @@ import type { EditorContext } from '../editors/EditorMode.js';
 import { usePijonStore } from '../../state/store.js';
 import { GridColorButton, GridColorPickerPopover } from '../editors/GridColorPicker.js';
 import { ASSET } from '../../assets/paths.js';
-import { THEMES } from '../../theme/themes.js';
+import { SCHEME_REGISTRY } from '../../theme/themes.js';
 import type { ThemeId } from '../../theme/themes.js';
 import {
-  settingsPopoverBackground,
   settingsPopoverBorder,
   settingsPopoverShadow,
   settingsHeaderText,
@@ -54,6 +53,9 @@ import {
   gearButtonBackgroundActive,
   gearButtonText,
   gearButtonTextActive,
+  // §10.A2 — themed settings surfaces
+  toolbarBackground,
+  appBackground,
 } from '../../theme/colors.js';
 
 // ---------------------------------------------------------------------------
@@ -245,30 +247,41 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         top: '100%',
         right: 0,
         zIndex: 1200,
-        background: settingsPopoverBackground,
+        // §10.A2 — body/window background = gridBackdrop color token
+        background: appBackground,
         border: `1px solid ${settingsPopoverBorder}`,
         borderRadius: 6,
         boxShadow: `0 4px 16px ${settingsPopoverShadow}`,
         minWidth: 260,
-        padding: '10px 14px 12px',
+        padding: 0,
         marginTop: 2,
+        overflow: 'hidden',
       }}
     >
-      {/* Header */}
+      {/* §10.A2 — Header strip uses topBar color */}
       <div
+        data-testid="settings-header"
         style={{
-          fontWeight: 700,
-          fontSize: '0.8rem',
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: settingsHeaderText,
-          marginBottom: 8,
-          paddingBottom: 6,
+          background: toolbarBackground,
+          padding: '8px 14px 8px',
           borderBottom: `1px solid ${dividerLight}`,
         }}
       >
-        Settings
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: '0.8rem',
+            textTransform: 'uppercase' as const,
+            letterSpacing: '0.06em',
+            color: settingsHeaderText,
+          }}
+        >
+          Settings
+        </span>
       </div>
+
+      {/* Body */}
+      <div style={{ padding: '6px 14px 12px' }}>
 
       {/* §7.B1 — UI scale preset buttons */}
       <div style={rowStyle}>
@@ -307,7 +320,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
       <div style={{ borderTop: `1px solid ${dividerLight}`, margin: '4px 0' }} />
 
-      {/* §7.C2 — Theme picker */}
+      {/* §8.B1 — Theme picker — iterates SCHEME_REGISTRY so new scheme files appear automatically */}
       <div style={rowStyle}>
         <span style={labelStyle}>Theme:</span>
         <div
@@ -315,8 +328,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           aria-label="Color theme"
           style={{ display: 'flex', gap: 4, flexShrink: 0 }}
         >
-          {(Object.keys(THEMES) as ThemeId[]).map((id) => {
+          {Object.keys(SCHEME_REGISTRY).map((id) => {
             const active = themeId === id;
+            const scheme = SCHEME_REGISTRY[id];
+            const schemeName = scheme?.name ?? id;
             return (
               <button
                 key={id}
@@ -328,9 +343,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   minWidth: 60,
                 }}
                 aria-pressed={active}
-                title={`Switch to ${THEMES[id].label} theme`}
+                title={`Switch to ${schemeName} theme`}
               >
-                {THEMES[id].label}
+                {schemeName}
               </button>
             );
           })}
@@ -441,6 +456,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       <div style={{ marginTop: 4 }}>
         <div style={sectionTitle}>Classroom</div>
       </div>
+      </div>{/* end body */}
     </div>
   );
 };

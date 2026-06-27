@@ -24,6 +24,7 @@ import type { EditorContext, EditorMode } from '../editors/EditorMode.js';
 import { EDITOR_REGISTRY } from '../editors/registry.js';
 import { SettingsMenu, GearButton } from './SettingsMenu.js';
 import { ToggleLever } from '../components/ToggleLever.js';
+import { getActiveThemeColors } from '../../theme/themes.js';
 import {
   toolbarBackground,
   toolbarBorder,
@@ -32,12 +33,9 @@ import {
   tabActiveBackground,
   tabActiveBorder,
   tabActiveText,
-  saveStatusSaved,
-  saveStatusSaving,
-  saveStatusDirty,
-  saveStatusError,
-  eraseButtonBorder,
-  eraseButtonText,
+  topBarRightBackground,
+  topBarRightText,
+  textMuted,
 } from '../../theme/colors.js';
 
 // Inject a tiny keyframe for the "saving…" pulse — done once, idempotent
@@ -70,13 +68,6 @@ const STATUS_LABEL: Record<string, string> = {
   error: '● Save error',
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  saved: saveStatusSaved,
-  saving: saveStatusSaving,
-  dirty: saveStatusDirty,
-  error: saveStatusError,
-};
-
 // ---------------------------------------------------------------------------
 // TopBar
 // ---------------------------------------------------------------------------
@@ -90,7 +81,11 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
   const saveStatus = usePijonStore((s) => s.saveStatus);
   const activeEditorId = usePijonStore((s) => s.activeEditorId);
   const label = STATUS_LABEL[saveStatus] ?? `● ${saveStatus}`;
-  const color = STATUS_COLOR[saveStatus] ?? '#555';
+  // §8.B3 — Re-render when theme changes so logo/text updates immediately.
+  // themeId is read from the store so this component re-renders on theme change;
+  // getActiveThemeColors() is then called to obtain the resolved logo path.
+  const themeId = usePijonStore((s) => s.themeId);
+  const activeLogoPath = themeId ? getActiveThemeColors().logo : null;
 
   // §7.A3 — Settings menu state lives here (shared across modes)
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -127,7 +122,7 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
         minHeight: 40,
       }}
     >
-      {/* Logo */}
+      {/* §8.B3 — Logo: image when scheme provides a path; "Pijon" text otherwise */}
       <div
         style={{
           display: 'flex',
@@ -137,33 +132,80 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
           flexShrink: 0,
         }}
       >
+        {activeLogoPath !== null ? (
+          <img
+            src={activeLogoPath}
+            alt="Pijon"
+            data-testid="logo-image"
+            style={{ height: 24, maxWidth: 80, objectFit: 'contain' }}
+            onError={(e) => {
+              // Graceful fallback: hide the broken image; show the sibling text span
+              e.currentTarget.style.display = 'none';
+              const sibling = e.currentTarget.nextElementSibling;
+              if (sibling instanceof HTMLElement) sibling.style.display = '';
+            }}
+          />
+        ) : null}
+        {/* Always in the DOM; visible when logo=null, hidden when logo is set */}
         <span
+          data-testid="logo-text"
           style={{
             fontWeight: 700,
             fontSize: '0.9rem',
             color: logoText,
             letterSpacing: '-0.01em',
+            display: activeLogoPath !== null ? 'none' : undefined,
           }}
         >
           Pijon
         </span>
       </div>
 
-      {/* §7.A1 — Furniture / Students lever (2-state toggle, not tabs) */}
+      {/* §11.B1 — Furniture [lever] Students — labelled-switch layout.
+           Both side labels are clickable; the lever knob also toggles.
+           Furniture = lever OFF/left; Students = lever ON/right.
+           Active side is bold + selectedBox accent; inactive side is muted. */}
       <div
         role="group"
         aria-label="Editor mode"
         style={{
           display: 'flex',
           alignItems: 'center',
+          gap: 6,
           padding: '0 8px',
           borderRight: `1px solid ${panelBorder}`,
           flexShrink: 0,
         }}
       >
+        {/* Left label — Furniture (active when lever is OFF) */}
+        <button
+          type="button"
+          data-testid="editor-mode-furniture"
+          onClick={() => {
+            usePijonStore.getState().setActiveEditorId(EDITOR_REGISTRY[0]?.id ?? 'furniture');
+          }}
+          title={`Switch to ${EDITOR_REGISTRY[0]?.label ?? 'Furniture'} editor`}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '0.82rem',
+            fontWeight: activeEditorId === (EDITOR_REGISTRY[0]?.id ?? 'furniture') ? 700 : 400,
+            color:
+              activeEditorId === (EDITOR_REGISTRY[0]?.id ?? 'furniture')
+                ? tabActiveBorder /* selectedBox accent */
+                : textMuted,
+            padding: '1px 2px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {EDITOR_REGISTRY[0]?.label ?? 'Furniture'}
+        </button>
+
+        {/* Center lever knob — toggles between the two editors */}
         <ToggleLever
-          labelOff={EDITOR_REGISTRY[0]?.label ?? 'Furniture'}
-          labelOn={EDITOR_REGISTRY[1]?.label ?? 'Students'}
+          labelOff=""
+          labelOn=""
           on={activeEditorId === (EDITOR_REGISTRY[1]?.id ?? 'student')}
           onToggle={() => {
             const current = usePijonStore.getState().activeEditorId;
@@ -183,7 +225,33 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
               ? `Switch to ${EDITOR_REGISTRY[0]?.label ?? 'Furniture'} editor`
               : `Switch to ${EDITOR_REGISTRY[1]?.label ?? 'Students'} editor`
           }
+          extraStyle={{ padding: '3px 6px', gap: 0 }}
         />
+
+        {/* Right label — Students (active when lever is ON) */}
+        <button
+          type="button"
+          data-testid="editor-mode-students"
+          onClick={() => {
+            usePijonStore.getState().setActiveEditorId(EDITOR_REGISTRY[1]?.id ?? 'student');
+          }}
+          title={`Switch to ${EDITOR_REGISTRY[1]?.label ?? 'Students'} editor`}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '0.82rem',
+            fontWeight: activeEditorId === (EDITOR_REGISTRY[1]?.id ?? 'student') ? 700 : 400,
+            color:
+              activeEditorId === (EDITOR_REGISTRY[1]?.id ?? 'student')
+                ? tabActiveBorder /* selectedBox accent */
+                : textMuted,
+            padding: '1px 2px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {EDITOR_REGISTRY[1]?.label ?? 'Students'}
+        </button>
       </div>
 
       {/* Active editor's Toolbar — fills remaining horizontal space */}
@@ -191,14 +259,18 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
         <activeEditor.Toolbar ctx={ctx} />
       </div>
 
-      {/* Global right-side trailing group: Settings · saved-status · Erase all */}
+      {/* §11.A4 — Global right-side trailing group: Settings · saved-status · Erase all.
+           Sits on its own `topBarRight` surface, separated by a 1px vertical divider.
+           Erase-all and Saved-locally have transparent backgrounds (they sit on this surface). */}
       <div
+        data-testid="top-bar-right"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 10,
           padding: '0 12px',
           borderLeft: `1px solid ${panelBorder}`,
+          background: topBarRightBackground,
           flexShrink: 0,
           whiteSpace: 'nowrap',
           position: 'relative',
@@ -217,33 +289,43 @@ export function TopBar({ activeEditor, ctx }: TopBarProps) {
           />
         </div>
 
-        {/* "Saved locally" indicator — pulses subtly while saving */}
+        {/* §11.A4/11.A5 — "Saved locally" indicator — transparent background on topBarRight
+             surface. Text uses topBarRightText (scheme-aware) for WCAG AA legibility:
+             classic = #333 (12.6:1 on #f5f5f5), purpleGreen = #fff (4.87:1 on #84659a). */}
         <span
           className={saveStatus === 'saving' ? 'pijon-saving-pulse' : undefined}
+          data-testid="saved-indicator"
           style={{
             fontSize: '0.78rem',
-            color,
+            color: topBarRightText,
             fontWeight: 500,
+            background: 'transparent',
+            padding: '1px 7px',
+            borderRadius: 3,
           }}
           title="All data is saved only on this device — nothing is uploaded"
         >
           {label}
         </span>
 
-        {/* Erase all — unobtrusive, clearly labelled */}
+        {/* §11.A4/11.A5 — Erase all — transparent background on topBarRight surface.
+             Text + border use topBarRightText (scheme-aware, WCAG AA) so the button
+             remains readable on both light (classic) and dark (purpleGreen) surfaces.
+             The border identifies it as an interactive element; the label communicates danger. */}
         <button
           type="button"
           onClick={handleEraseAll}
+          data-testid="erase-all-button"
           title="Erase all class data from this device (for shared computers)"
           style={{
             padding: '2px 8px',
             fontSize: '0.72rem',
-            color: eraseButtonText,
+            color: topBarRightText,
             background: 'transparent',
-            border: `1px solid ${eraseButtonBorder}`,
+            border: `1px solid ${topBarRightText}`,
             borderRadius: 3,
             cursor: 'pointer',
-            opacity: 0.75,
+            opacity: 0.85,
           }}
         >
           Erase all

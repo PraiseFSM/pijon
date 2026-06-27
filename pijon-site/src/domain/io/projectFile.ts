@@ -52,6 +52,7 @@ import type { FurnitureId, StudentId, FurnitureKind, Vec2 } from '../types.js';
 import type { Student } from '../student.js';
 import type { Furniture } from '../furniture.js';
 import type { Classroom } from '../classroom.js';
+import type { CustomFurnitureDef } from '../classroom.js';
 import { furnitureId, studentId } from '../types.js';
 import { makeFixture } from '../student.js';
 import { assignOccupant } from '../furniture.js';
@@ -74,6 +75,7 @@ const FurnitureKindSchema = z.enum([
   'table',
   'teacher_desk',
   'whiteboard',
+  'custom',
 ]);
 
 /**
@@ -93,9 +95,26 @@ const FurnitureSchema = z.object({
   h: z.number().int().positive(),
   rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
   imagePath: z.string().optional(),
+  /**
+   * §8.C1 — Optional image data URL for custom-imported furniture.
+   * Absent in older files → undefined (no imageUrl, falls back to kind rendering).
+   */
+  imageUrl: z.string().nullable().optional(),
   numSeats: z.number().int().positive().optional(),
   /** Only fixture occupants (isFixture === true) are persisted in geometry. */
   fixtureOccupant: FixtureOccupantSchema.optional(),
+});
+
+/**
+ * §8.C1 — Schema for one custom palette entry.
+ * imageUrl is a data URL produced by FileReader.readAsDataURL — never a network URL.
+ */
+const CustomFurnitureDefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  imageUrl: z.string(),
+  wUnits: z.number().int().positive(),
+  hUnits: z.number().int().positive(),
 });
 
 const PreferenceSchema = z.discriminatedUnion('kind', [
@@ -153,6 +172,12 @@ const ClassroomGeometrySchema = z.object({
    * Additive: old files load without errors and round-trip safely.
    */
   gridColor: z.string().nullable().default(null),
+  /**
+   * §8.C1: teacher-imported custom furniture palette (data-URL images).
+   * Absent in older files → [] via .default([]).
+   * Backward-compatible: old files parse without errors.
+   */
+  customPalette: z.array(CustomFurnitureDefSchema).default([]),
 });
 
 /**
@@ -182,6 +207,7 @@ export type ProjectFile = z.infer<typeof ProjectFileSchema>;
 export type ProjectFurniture = z.infer<typeof FurnitureSchema>;
 export type ProjectStudent = z.infer<typeof StudentSchema>;
 export type ProjectClassroomGeometry = z.infer<typeof ClassroomGeometrySchema>;
+export type ProjectCustomFurnitureDef = z.infer<typeof CustomFurnitureDefSchema>;
 
 // ---------------------------------------------------------------------------
 // Parse error
@@ -363,6 +389,8 @@ export function composeClassroom(pf: ProjectFile): LoadedProject {
       h: pf_f.h,
       rotation: pf_f.rotation,
       imagePath: pf_f.imagePath,
+      // §8.C1 — restore imageUrl from persisted furniture (data URL for custom kind)
+      ...(pf_f.imageUrl !== undefined ? { imageUrl: pf_f.imageUrl } : {}),
       numSeats: pf_f.numSeats,
       occupants: [],
     };
@@ -405,6 +433,15 @@ export function composeClassroom(pf: ProjectFile): LoadedProject {
 
   furnitureList = Array.from(fidMap.values());
 
+  // §8.C1 — restore custom palette entries (data-URL image defs)
+  const customPalette: CustomFurnitureDef[] = pf.classroom.customPalette.map((d) => ({
+    id: d.id,
+    name: d.name,
+    imageUrl: d.imageUrl,
+    wUnits: d.wUnits,
+    hUnits: d.hUnits,
+  }));
+
   const classroom: Classroom = {
     id: pf.classroom.id,
     name: pf.classroom.name,
@@ -415,6 +452,7 @@ export function composeClassroom(pf: ProjectFile): LoadedProject {
     thresholdUnits: pf.classroom.thresholdUnits,
     backgroundImage: pf.classroom.backgroundImage ?? null,
     gridColor: pf.classroom.gridColor ?? null,
+    customPalette,
   };
 
   const locks: FurnitureId[] = pf.locks.map(furnitureId);
@@ -462,6 +500,8 @@ export function extractProject(state: ProjectState): ProjectFile {
       h: f.h,
       rotation: f.rotation,
       ...(f.imagePath !== undefined ? { imagePath: f.imagePath } : {}),
+      // §8.C1 — persist imageUrl when set (data URL for custom-imported furniture)
+      ...(f.imageUrl !== undefined && f.imageUrl !== null ? { imageUrl: f.imageUrl } : {}),
       ...(f.numSeats !== undefined ? { numSeats: f.numSeats } : {}),
       ...(fixtureOcc !== undefined
         ? { fixtureOccupant: { id: fixtureOcc.id, name: fixtureOcc.name } }
@@ -488,6 +528,15 @@ export function extractProject(state: ProjectState): ProjectFile {
     metadata: s.metadata,
   }));
 
+  // §8.C1 — serialise custom palette (data-URL image defs)
+  const pfCustomPalette: ProjectCustomFurnitureDef[] = (classroom.customPalette ?? []).map((d) => ({
+    id: d.id,
+    name: d.name,
+    imageUrl: d.imageUrl,
+    wUnits: d.wUnits,
+    hUnits: d.hUnits,
+  }));
+
   return {
     version: 2,
     classroom: {
@@ -500,6 +549,7 @@ export function extractProject(state: ProjectState): ProjectFile {
       thresholdUnits: classroom.thresholdUnits,
       backgroundImage: classroom.backgroundImage ?? null,
       gridColor: classroom.gridColor ?? null,
+      customPalette: pfCustomPalette,
     },
     roster: pfRoster,
     arrangement,
@@ -602,6 +652,7 @@ export function importLegacyClassroom(json: string): ProjectFile {
       thresholdUnits: DEFAULT_THRESHOLD_UNITS,
       backgroundImage: null,
       gridColor: null,
+      customPalette: [],
     },
     roster: [],
     arrangement: {},

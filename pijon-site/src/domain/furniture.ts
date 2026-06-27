@@ -31,6 +31,13 @@ export interface Furniture {
   readonly rotation: 0 | 90 | 180 | 270;
   readonly imagePath?: string;
   /**
+   * §8.C1 — Optional image data URL for custom-imported furniture.
+   * When set, the canvas renderer draws this image instead of the kind's
+   * asset/color fill. Null or undefined falls back to the kind rendering.
+   * Data URLs are local (FileReader.readAsDataURL) — no network at any point.
+   */
+  readonly imageUrl?: string | null;
+  /**
    * At most one occupant for now (desk/fixture).
    * Tables will expand to multiple occupants in a later phase.
    */
@@ -62,6 +69,7 @@ export function capacity(f: Furniture): number {
       return f.numSeats ?? 4;
     case 'teacher_desk':
     case 'whiteboard':
+    case 'custom':
       return 0;
   }
 }
@@ -142,6 +150,7 @@ export function seatCells(f: Furniture): Vec2[] {
 
     case 'teacher_desk':
     case 'whiteboard':
+    case 'custom':
       return [];
   }
 }

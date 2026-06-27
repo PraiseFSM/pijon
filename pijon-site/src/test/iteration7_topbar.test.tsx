@@ -182,22 +182,28 @@ describe('A. Editor lever — renders and reflects mode', () => {
     setActiveEditorId.mockRestore();
   });
 
-  it('A5: lever shows OFF label (Furniture) in Furniture mode', () => {
+  it('A5: "Furniture" label renders next to lever in Furniture mode (active side)', () => {
+    // §11.B1 — the label flanks the lever; it is a separate button, not inside the lever itself
     act(() => { usePijonStore.setState({ activeEditorId: EDITOR_REGISTRY[0]?.id ?? 'furniture' }); });
     const ctx = makeCtx();
     render(React.createElement(TopBar, { activeEditor: fakeEditor, ctx }));
-    const lever = screen.getByTestId('editor-mode-lever');
-    // When OFF, ToggleLever shows labelOff which is EDITOR_REGISTRY[0].label = "Furniture"
-    expect(lever.textContent).toContain(EDITOR_REGISTRY[0]?.label ?? 'Furniture');
+    // The side-label button must be present and contain the Furniture label
+    const furnitureLabel = screen.getByTestId('editor-mode-furniture');
+    expect(furnitureLabel.textContent).toContain(EDITOR_REGISTRY[0]?.label ?? 'Furniture');
+    // The Students label must also be present (always shown, just muted)
+    const studentsLabel = screen.getByTestId('editor-mode-students');
+    expect(studentsLabel.textContent).toContain(EDITOR_REGISTRY[1]?.label ?? 'Students');
   });
 
-  it('A5b: lever shows ON label (Students) in Students mode', () => {
+  it('A5b: "Students" label renders next to lever in Students mode (active side)', () => {
+    // §11.B1 — both labels always rendered; active side is bold/accented
     act(() => { usePijonStore.setState({ activeEditorId: EDITOR_REGISTRY[1]?.id ?? 'student' }); });
     const ctx = makeCtx();
     render(React.createElement(TopBar, { activeEditor: fakeEditor, ctx }));
-    const lever = screen.getByTestId('editor-mode-lever');
-    // When ON, ToggleLever shows labelOn which is EDITOR_REGISTRY[1].label = "Students"
-    expect(lever.textContent).toContain(EDITOR_REGISTRY[1]?.label ?? 'Students');
+    const studentsLabel = screen.getByTestId('editor-mode-students');
+    expect(studentsLabel.textContent).toContain(EDITOR_REGISTRY[1]?.label ?? 'Students');
+    const furnitureLabel = screen.getByTestId('editor-mode-furniture');
+    expect(furnitureLabel.textContent).toContain(EDITOR_REGISTRY[0]?.label ?? 'Furniture');
   });
 
   it('A: lever toggle is bidirectional — two clicks return to original mode', () => {

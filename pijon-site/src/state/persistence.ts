@@ -59,6 +59,9 @@ const DB_NAME = 'pijon';
 const DB_VERSION = 1;
 const STORE_NAME = 'projects';
 
+/** How long to wait after the last store change before writing to IndexedDB (ms). */
+const DEBOUNCE_WRITE_MS = 400;
+
 /**
  * The shape stored in IndexedDB.
  * Key: `project:<classroomId>`
@@ -289,7 +292,7 @@ export async function initPersistence(): Promise<PersistenceHandle> {
       .catch(() => {
         usePijonStore.getState().setSaveStatus('error');
       });
-  }, 400);
+  }, DEBOUNCE_WRITE_MS);
 
   // Zustand subscribe — called on every state change.
   // usePijonStore.subscribe receives the full store state.

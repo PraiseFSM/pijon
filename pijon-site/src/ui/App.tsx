@@ -66,6 +66,9 @@ import { registerAssignerCursorListener } from './editors/StudentEditor.js';
 
 export const UI_BASE_CELL_SIZE = 48;
 
+/** Padding (in px) between the viewport scroll area and the canvas card. */
+const CANVAS_CARD_PADDING = 12;
+
 // ---------------------------------------------------------------------------
 // Minimal no-op CanvasView — used before the canvas mounts and fires onViewReady.
 // After the first render cycle the real view replaces this.
@@ -125,7 +128,8 @@ export default function App() {
 
   useEffect(() => {
     const palette = THEMES[themeId];
-    applyThemeVars(palette);
+    // Guard: palette may be undefined if the stored themeId is stale
+    if (palette !== undefined) applyThemeVars(palette);
   }, [themeId]);
 
   // ---- §7.B1 — UI scale (on-screen base unit px) ----------------------------
@@ -167,6 +171,15 @@ export default function App() {
       unregister();
     };
   }, []);
+
+  // ---- §10.B1 — Canvas-area backdrop ref ------------------------------------
+  // The scroll-wheel zoom listener is attached to this div (the grey backdrop
+  // that fills the space to the right of the side panel).  Attaching here — not
+  // to the canvas element itself — means wheeling anywhere in the backdrop
+  // (including the grey margin around the canvas card) also zooms.
+  // The top bar and left panel are siblings OUTSIDE this div, so they are
+  // unaffected.
+  const canvasBackdropRef = useRef<HTMLDivElement>(null);
 
   // ---- CanvasView from ClassroomCanvas --------------------------------------
   // ClassroomCanvas fires onViewReady whenever the canvas is ready / resized.
@@ -225,7 +238,11 @@ export default function App() {
         <SidePanel activeEditor={activeEditor} ctx={editorCtx} />
 
         {/* Canvas area — single instance, never unmounts, fills remaining space */}
+        {/* §10.B1: ref attached so ClassroomCanvas can receive wheel events fired
+            anywhere in this backdrop (not just over the canvas element). */}
         <div
+          ref={canvasBackdropRef}
+          data-testid="canvas-area-backdrop"
           style={{
             flex: 1,
             overflow: 'auto',
@@ -233,7 +250,7 @@ export default function App() {
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'flex-start',
-            padding: 12,
+            padding: CANVAS_CARD_PADDING,
           }}
         >
           <div
@@ -248,12 +265,17 @@ export default function App() {
             {/* §14.7 / 5.A4 — in Furniture mode the ghost ring is ONE UNIT wide
                  (cellsPerUnit cells) so the one-unit PLUS resize buttons live
                  fully outside the grid at any granularity. */}
+            {/* §10.B1: pass the backdrop ref so wheel events anywhere in the
+                grey area behind the canvas card also zoom. The canvas is inside
+                the backdrop, so backdrop-level events cover canvas-level events
+                too — no double-handling. */}
             <ClassroomCanvas
               editor={activeEditor}
               cellSize={cellSizePx}
               ghostMargin={activeEditor.id === 'furniture' ? store.classroom.cellsPerUnit : 0}
               onViewReady={handleViewReady}
               cursor={assignerActive ? ASSIGNER_CURSOR : 'crosshair'}
+              wheelTargetRef={canvasBackdropRef}
             />
           </div>
         </div>

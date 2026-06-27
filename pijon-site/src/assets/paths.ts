@@ -6,7 +6,13 @@
  * this file and all references follow automatically.
  *
  * All assets live in `public/assets/` which Vite serves at `/assets/…`.
- * The paths are root-relative so they work regardless of the page URL depth.
+ *
+ * §8.D7 — GitHub Pages readiness:
+ * Paths are constructed from `import.meta.env.BASE_URL` (injected by Vite at
+ * build time) so they resolve correctly whether the app is hosted at a root
+ * path (e.g. Netlify: BASE_URL = '/') or a subpath (e.g. GitHub Pages project
+ * site: BASE_URL = '/pijon/'). Set `base: '/<repo>/'` in vite.config.ts for
+ * GitHub Pages project sites — see README for details.
  *
  * See `public/assets/ASSETS.md` for the authoritative asset reference table
  * (purpose, expected size, format, filename for every asset).
@@ -16,10 +22,12 @@
  */
 
 // ---------------------------------------------------------------------------
-// Base prefix — single place to update if the asset folder ever moves
+// Base prefix — derived from Vite's BASE_URL so subpath deployments work.
+// import.meta.env.BASE_URL is always defined by Vite (default '/').
+// Trailing slash is normalised away before joining with 'assets'.
 // ---------------------------------------------------------------------------
 
-const BASE = '/assets' as const;
+const BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/assets`;
 
 // ---------------------------------------------------------------------------
 // ASSET — the public API for this module

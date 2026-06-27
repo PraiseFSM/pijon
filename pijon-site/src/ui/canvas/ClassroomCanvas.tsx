@@ -17,7 +17,7 @@
  * LOCAL-FIRST: no network calls. All data from the Zustand store.
  */
 
-import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, type RefObject } from 'react';
 import { usePijonStore } from '../../state/store.js';
 import { renderBasePass } from './render.js';
 import { registerRepaintCallback, primeImage } from './imageCache.js';
@@ -88,13 +88,31 @@ export interface ClassroomCanvasProps {
    * Swap the red image for a custom one by changing the ASSIGNER_CURSOR constant.
    */
   cursor?: string;
+
+  /**
+   * §10.B1 — Optional ref to the element that should receive the scroll-wheel
+   * zoom listener instead of the canvas itself.
+   *
+   * When provided, the non-passive `wheel` listener is attached to
+   * `wheelTargetRef.current` (the backdrop container) so scrolling anywhere in
+   * the grey area behind the grid zooms just like scrolling directly over the
+   * canvas.  The same handler runs: `preventDefault()` (suppresses page scroll)
+   * + clamped `setZoom`.
+   *
+   * When NOT provided the listener falls back to the canvas element, preserving
+   * the pre-10.B1 behaviour and keeping existing tests green.
+   *
+   * IMPORTANT: attach to the backdrop container — NOT to document/window — so
+   * the top bar and left side panel remain unaffected.
+   */
+  wheelTargetRef?: RefObject<HTMLElement | null>;
 }
 
 // ---------------------------------------------------------------------------
 // ClassroomCanvas
 // ---------------------------------------------------------------------------
 
-export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onViewReady, cursor = 'crosshair' }: ClassroomCanvasProps) {
+export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onViewReady, cursor = 'crosshair', wheelTargetRef }: ClassroomCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // RAF handle stored in a ref (not state) so scheduling never triggers re-renders.
@@ -103,6 +121,10 @@ export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onView
   // Subscribe to the parts of store state the canvas needs to render.
   const classroom = usePijonStore((s) => s.classroom);
   const locks = usePijonStore((s) => s.locks);
+  // §10.A3 — subscribe to themeId so a theme switch triggers a canvas repaint.
+  // DOM tokens update automatically via CSS vars, but the canvas reads resolved
+  // palette values from getActiveThemeColors() and must repaint explicitly.
+  const themeId = usePijonStore((s) => s.themeId);
 
   const activeEditor = editor ?? NoopEditor;
 
@@ -253,10 +275,13 @@ export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onView
     resizeCanvas();
   }, [resizeCanvas, classroom.gridW, classroom.gridH, ecs, ghostMargin]);
 
-  // Repaint whenever classroom contents or locks change (grid dims handled above)
+  // Repaint whenever classroom contents, locks, or theme change.
+  // Theme changes update the module-level active palette (via _setActiveThemeInternal
+  // called by setTheme in the store) before this effect fires, so getActiveThemeColors()
+  // returns the new palette on the next repaint. Grid dims handled by the resize effect above.
   useEffect(() => {
     scheduleRepaint();
-  }, [scheduleRepaint, classroom, locks]);
+  }, [scheduleRepaint, classroom, locks, themeId]);
 
   // Cancel any pending rAF on unmount
   useEffect(() => {
@@ -392,14 +417,30 @@ export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onView
 
   // §6.B2 — Scroll-wheel zoom: non-passive native listener so preventDefault works.
   // React's synthetic onWheel is passive in React 17+ (can't call preventDefault).
-  // We attach a native listener with { passive: false } on the canvas element so
+  // We attach a native listener with { passive: false } on the target element so
   // the browser allows us to suppress the default scroll-page behaviour.
+  //
+  // §10.B1 — The target is `wheelTargetRef?.current ?? canvasRef.current`.
+  // When the shell passes a `wheelTargetRef` (the backdrop container div),
+  // the listener is attached there instead of the canvas, so scrolling anywhere
+  // in the grey margin around the canvas card also zooms.  The canvas is inside
+  // the backdrop, so wheel events on the canvas bubble up to the backdrop —
+  // there is NO second listener on the canvas, avoiding double-handling.
+  //
+  // NOT attached to document/window so the top bar and left panel are unaffected.
   //
   // The zoom state change triggers a re-render → re-derives ecs → re-fires
   // onViewReady (via the ecs dep), so all derived geometry stays correct.
+  //
+  // Dep: `wheelTargetRef` — the stable ref object (not .current; reading .current
+  // inside the effect body is correct per React rules; .current in deps is banned
+  // by the react-hooks/refs lint rule).  In practice this effect runs once on
+  // mount since the ref object identity never changes.
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas === null) return;
+    // Read .current inside the effect (not in the dep array — ESLint disallows it).
+    // Prefer the external backdrop target; fall back to the canvas element.
+    const target: HTMLElement | null = wheelTargetRef?.current ?? canvasRef.current;
+    if (target === null) return;
 
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
@@ -409,10 +450,9 @@ export function ClassroomCanvas({ editor, cellSize = 48, ghostMargin = 0, onView
       });
     };
 
-    canvas.addEventListener('wheel', onWheel, { passive: false });
-    return () => { canvas.removeEventListener('wheel', onWheel); };
-    // Only attach once on mount — onWheel captures setZoom (stable) and ZOOM_* constants.
-  }, []);
+    target.addEventListener('wheel', onWheel, { passive: false });
+    return () => { target.removeEventListener('wheel', onWheel); };
+  }, [wheelTargetRef]); // stable ref object; .current read inside effect body
 
   // -------------------------------------------------------------------------
   // Render — initial width/height attrs; resizeCanvas overwrites with DPR values

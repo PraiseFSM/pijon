@@ -34,6 +34,7 @@ import {
   primaryButtonText,
   btnBackground,
   btnBorder,
+  btnText,
   disabledButtonBackground,
   bannerErrorBackground,
   bannerErrorBorder,
@@ -77,8 +78,6 @@ import {
   selectedStudentHeaderBackground,
   prefPreferText,
   prefAvoidText,
-  dragTargetFill,
-  dragTargetStroke,
   rosterDropTargetFill,
   rosterDropTargetStroke,
   dragSourceFade,
@@ -90,12 +89,12 @@ import {
   neighborFill,
   lockBadgeFill,
   lockBadgeText,
-  dragGhostFill,
   dragGhostStroke,
   dragGhostText,
   prefLinkPrefer,
   prefLinkAvoid,
 } from '../../theme/colors.js';
+import { getActiveThemeColors, rgbaFromHex } from '../../theme/themes.js';
 import { WeightSelector } from '../components/WeightSelector.js';
 import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureId, StudentId } from '../../domain/types.js';
@@ -359,6 +358,13 @@ export function registerAssignerCursorListener(cb: (on: boolean) => void): () =>
 // SeatGraph cache helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Return a SeatGraph for the given classroom and threshold, reusing the
+ * cached instance when both the classroom reference AND the threshold are
+ * identical to the last call.  The classroom reference changes whenever the
+ * Zustand store commits a new immutable snapshot, so this effectively
+ * invalidates the cache on every relevant store mutation.
+ */
 function getSeatGraph(classroom: Classroom, threshold: number): SeatGraph {
   if (
     cachedGraph !== null &&
@@ -374,6 +380,7 @@ function getSeatGraph(classroom: Classroom, threshold: number): SeatGraph {
   return g;
 }
 
+/** Drop all cached graph state — called in deactivate() and on test teardown. */
 function clearGraphCache(): void {
   cachedGraph = null;
   cachedGraphClassroom = null;
@@ -384,6 +391,19 @@ function clearGraphCache(): void {
 // Violation logic (port of SeatingGrid._has_violation — bidirectional avoid)
 // ---------------------------------------------------------------------------
 
+/**
+ * Return true when placing `student` at seat `fid` would violate any
+ * bidirectional avoid-preference.
+ *
+ * Two directions are checked:
+ *   a) `student` has an avoid-preference whose target is already seated next
+ *      to `fid` in the SeatGraph.
+ *   b) Some already-seated student has an avoid-preference for `student`, AND
+ *      that student's seat is a SeatGraph neighbour of `fid`.
+ *
+ * Bidirectionality means "A avoids B" is flagged even when only B is in the
+ * avoid list — mirrors SeatingGrid._has_violation in classroom_builder.py.
+ */
 function hasViolation(
   student: Student,
   fid: FurnitureId,
@@ -505,6 +525,25 @@ function paintPreferenceLinks(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Overlay paint constants
+// ---------------------------------------------------------------------------
+
+/** Lock-badge size as a fraction of the cell size (§13.6). */
+const BADGE_SIZE_RATIO = 0.22;
+/** Minimum lock-badge side length in CSS pixels. */
+const BADGE_MIN_PX = 10;
+
+// Assigner pulse ring — alpha oscillates around PULSE_BASE ± PULSE_AMP at PULSE_HZ Hz.
+const PULSE_BASE = 0.80;
+const PULSE_AMP  = 0.20;
+/** Frequency of the assigner pulse animation in Hz. */
+const PULSE_HZ   = 2;
+/** Alpha multiplier for the outer glow fill (applied to the pulse value). */
+const PULSE_GLOW_ALPHA_SCALE = 0.22;
+/** Alpha multiplier for the outer thin ring (applied to the pulse value). */
+const PULSE_RING_ALPHA_SCALE = 0.7;
+
 /**
  * Full paintOverlay pass — draws all overlays for the StudentEditor.
  *
@@ -550,10 +589,13 @@ function paintStudentOverlay(
     const isNeighbor = neighborSet.has(fid);
 
     // --- Drag target highlight (pointer drag between desks) ---
+    // §10.A3 — derive fill/stroke from active selectedBox so the highlight is
+    // purple on purpleGreen and blue on classic (resolved at draw time, not static).
     if (!assignerModeActive && isDragTarget) {
-      ctx2d.fillStyle = dragTargetFill;
+      const accentHex = getActiveThemeColors().selectedBox;
+      ctx2d.fillStyle = rgbaFromHex(accentHex, 0.22);
       ctx2d.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-      ctx2d.strokeStyle = dragTargetStroke;
+      ctx2d.strokeStyle = rgbaFromHex(accentHex, 0.9);
       ctx2d.lineWidth = 2;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
@@ -609,7 +651,7 @@ function paintStudentOverlay(
 
     // --- Lock badge ---
     if (locks.has(fid) && occ !== undefined && !isFixt) {
-      const badgeSize = Math.max(10, Math.round(view.cellSize * 0.22));
+      const badgeSize = Math.max(BADGE_MIN_PX, Math.round(view.cellSize * BADGE_SIZE_RATIO));
       const bx = r.x + r.w - badgeSize - 2;
       const by = r.y + 2;
       ctx2d.fillStyle = lockBadgeFill;
@@ -628,12 +670,12 @@ function paintStudentOverlay(
     if (srcF !== undefined) {
       const r = furnitureToPixelRect(srcF, view.cellSize);
 
-      // Pulse: alpha oscillates between 0.6 and 1.0 at ~2 Hz
-      const pulse = 0.80 + 0.20 * Math.sin((Date.now() / 1000) * Math.PI * 2 * 2);
+      // Pulse: alpha oscillates between (PULSE_BASE - PULSE_AMP) and (PULSE_BASE + PULSE_AMP) at PULSE_HZ Hz
+      const pulse = PULSE_BASE + PULSE_AMP * Math.sin((Date.now() / 1000) * Math.PI * 2 * PULSE_HZ);
 
       // Outer glow fill — uses assignerPulseGlowBase (255,152,0 = #ff9800) with animated alpha
       // assignerPulseGlowBase token = '#ff6f00' (deep orange); alpha interpolated at runtime
-      ctx2d.fillStyle = `rgba(255, 152, 0, ${(0.22 * pulse).toFixed(3)})`;
+      ctx2d.fillStyle = `rgba(255, 152, 0, ${(PULSE_GLOW_ALPHA_SCALE * pulse).toFixed(3)})`;
       ctx2d.fillRect(r.x, r.y, r.w, r.h);
 
       // Inner thick amber ring (inset by 1px so it sits inside the furniture cell)
@@ -644,13 +686,14 @@ function paintStudentOverlay(
       ctx2d.strokeRect(r.x + inset, r.y + inset, r.w - inset * 2, r.h - inset * 2);
 
       // Outer ring — assignerPulseAmber token = '#ff9800' → rgb(255,193,7 approx)
-      ctx2d.strokeStyle = `rgba(255, 193, 7, ${(0.7 * pulse).toFixed(3)})`;
+      ctx2d.strokeStyle = `rgba(255, 193, 7, ${(PULSE_RING_ALPHA_SCALE * pulse).toFixed(3)})`;
       ctx2d.lineWidth = 1.5;
       ctx2d.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
     }
   }
 
   // --- Drag ghost (floating label under the pointer) ---
+  // §10.A3 — ghost fill uses active selectedBox accent (blue on classic, purple on purpleGreen)
   if (!assignerModeActive && dragStudent !== null && dragCanvasPos !== null) {
     const label = dragStudent.name;
     const ghostW = Math.max(70, label.length * 7 + 16);
@@ -658,7 +701,7 @@ function paintStudentOverlay(
     const gx = dragCanvasPos.x - ghostW / 2;
     const gy = dragCanvasPos.y - ghostH / 2;
 
-    ctx2d.fillStyle = dragGhostFill;
+    ctx2d.fillStyle = rgbaFromHex(getActiveThemeColors().selectedBox, 0.88);
     ctx2d.beginPath();
     const rad = 4;
     ctx2d.moveTo(gx + rad, gy);
@@ -864,6 +907,12 @@ const AllocateSplitButton: React.FC<{
 }> = ({ algorithmId, variant, onRun, onChangeAlgorithm, onChangeVariant }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // The toolbar row clips its overflow (height stability), so an absolutely-
+  // positioned menu would be cut off. We position the menu with `position: fixed`
+  // (which escapes ancestor overflow clipping) anchored to the button's on-screen
+  // rect, captured when the menu opens. The menu stays a DOM child of the wrapper,
+  // so the click-outside `contains` check below still works.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
   // Click-outside closes the dropdown
   useEffect(() => {
@@ -943,7 +992,16 @@ const AllocateSplitButton: React.FC<{
       <button
         type="button"
         style={arrowBtnStyle}
-        onClick={() => { setDropdownOpen((v) => !v); }}
+        onClick={() => {
+          // Capture the wrapper's on-screen position before opening so the
+          // fixed-position menu can anchor just below it (escaping the toolbar's
+          // overflow clip). getBoundingClientRect returns zeros in jsdom — fine.
+          if (!dropdownOpen && dropdownRef.current) {
+            const r = dropdownRef.current.getBoundingClientRect();
+            setMenuPos({ top: r.bottom + 2, left: r.left });
+          }
+          setDropdownOpen((v) => !v);
+        }}
         data-testid="allocate-dropdown-toggle"
         aria-expanded={dropdownOpen}
         aria-label="Algorithm and variant options"
@@ -957,16 +1015,15 @@ const AllocateSplitButton: React.FC<{
         <div
           data-testid="allocate-dropdown-menu"
           style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
+            position: 'fixed',
+            top: menuPos.top,
+            left: menuPos.left,
             zIndex: 1100,
             background: '#fff',
             border: '1px solid #ccc',
             borderRadius: 5,
             boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
             minWidth: 200,
-            marginTop: 2,
           }}
         >
           {/* Algorithm section */}
@@ -1120,6 +1177,10 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     borderRadius: 4,
     border: `1px solid ${btnBorder}`,
     background: btnBackground,
+    // §12.A1 — Route button text color to the themed buttonText token so it
+    // updates correctly when the active scheme changes (e.g. purpleGreen uses
+    // near-white text on its dark button surfaces).
+    color: btnText,
     cursor: 'pointer',
     fontSize: '0.82rem',
     whiteSpace: 'nowrap',
@@ -1132,10 +1193,19 @@ const StudentToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
       <div
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
+          /* §8.A2: nowrap + minHeight keep this row a constant single-line height
+             so the TopBar never jumps when switching between editor modes.
+             §8.A2 fix: overflowX:auto instead of overflow:hidden so the long
+             Students toolbar can scroll horizontally at narrow widths rather than
+             silently clipping Export/Import/Assigner controls. overflowY:hidden
+             still prevents any vertical bleed. */
+          flexWrap: 'nowrap',
           alignItems: 'center',
           gap: 4,
           padding: '5px 10px',
+          minHeight: 40,
+          overflowX: 'auto',
+          overflowY: 'hidden',
           background: toolbarBackground,
           borderBottom: `1px solid ${toolbarBorder}`,
         }}
@@ -1643,8 +1713,9 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
   return (
     <div
       style={{
-        width: 220,
-        minWidth: 200,
+        /* §8.A2 — Width is controlled by the shell SidePanel wrapper
+         * (SIDE_PANEL_WIDTH in SidePanel.tsx). Do NOT set a fixed px width here. */
+        width: '100%',
         display: 'flex',
         flexDirection: 'column',
         background: sidePanelBackground,
@@ -1718,7 +1789,9 @@ const StudentRosterPanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
                   if (e.key === 'Enter' || e.key === ' ') handleStudentClick(s.id);
                 }}
               >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                {/* §12.A3 — Roster student names use the themed text token so they
+                    recolor correctly when the active scheme changes. */}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: textDark }}>
                   {s.name}
                 </span>
                 {s.preferences.length > 0 && (
@@ -2077,6 +2150,12 @@ const StudentSidePanelWithMenu: React.FC<{ ctx: EditorContext }> = ({ ctx }) => 
 // Pointer / canvas helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Convert a client-space pointer position to the center of the grid cell
+ * at that position, in canvas-pixel space.  Returns null when the pointer is
+ * outside the grid (view.cellAt returns undefined).
+ * Used to position the drag-ghost over the cell the user is hovering.
+ */
 function clientToCanvasPixel(
   clientX: number,
   clientY: number,
@@ -2090,6 +2169,11 @@ function clientToCanvasPixel(
   };
 }
 
+/**
+ * Return the last furniture whose bounding box contains `cell`, or null when
+ * no furniture is present.  "Last" matches paint order (topmost visually).
+ * Used by onPointerDown to resolve which piece the user wants to drag.
+ */
 function findDraggableFurnitureAt(
   cell: { x: number; y: number },
   furniture: readonly Furniture[],

@@ -214,13 +214,184 @@ buttons (80/100/120/150%) in the shared Settings; composes with scroll-wheel zoo
 (incl. App-integration + localStorage edge cases). Tests: `iteration7_uiScale.test.tsx`.
 - [x] **7.B1 Default UI scale +20% + Settings control**, persisted; composes with wheel zoom.
 
-**Cluster C — Color themes.** Files: `theme/colors.ts` (theme infra), shell/editor components reading colors,
-`ui/shell/SettingsMenu.tsx` (theme picker).
-- [ ] **7.C1 Theme infra** — a theme = a named palette; the UI reads colors through the active theme,
-  not hardcoded. Built so adding a 3rd/4th theme is just another named palette. Persist the choice.
-- [ ] **7.C2 Two themes + picker in Settings.** Theme 1 "Classic" = current light look. Theme 2
-  "Purple/Green": area behind the placer grid `#939598`, top bar `#84659a`, left panel `#48765d`
-  (derive the rest of the palette to match). Tests + checker.
+**Cluster C — Color themes. ✅ BUILT 2026-06-23 (checker folded into Iteration 8 theming rework).**
+Verified suite 1545 green, tsc + lint clean, build OK. `theme/themes.ts` (named palettes), CSS-vars for DOM
+(`applyThemeVars`) + resolved palette for canvas (`getActiveThemeColors`), theme id in store + localStorage,
+picker in shared Settings. Theme 2 surfaces exact (#939598 behind-grid, #84659a top bar, #48765d left panel).
+- [x] **7.C1 Theme infra** (named palette; CSS-var DOM + resolved-canvas; persisted).
+- [x] **7.C2 Two themes + Settings picker.** Classic + Purple/Green.
+  > NOTE: Iteration 8 reworks this into per-file `.json` schemes with new value semantics (text color, logo,
+  > special-text bg) — that cluster's builder+checker supersedes a standalone 7.C checker.
+
+> **Iteration 7 COMPLETE (2026-06-23).** A (one unified top bar + Furniture/Students lever + unified Settings
+> + algorithm→Allocate dropdown), B (UI scale +20% default + Settings control, persisted), C (color themes).
+> Suite: **1545 tests green**, tsc + lint clean, production PWA build OK. (Scroll-zoom "bug" was a false alarm.)
+
+### Iteration 8 — round-6 feedback (processed from feedback.txt, 2026-06-25)
+
+Conductor translation, **bug → feature → finalization** order; each cluster gets a builder + checker pass.
+Outline updated (Look & feel themes as `.json` schemes + logo + special text; Experience constant-size bars;
+Classroom building import-furniture). Run sequentially (shared files: App/shell/theme).
+
+**Cluster A — Layout bugs. ✅ COMPLETE 2026-06-25.** Builder + checker; verified suite 1570 green, tsc 0,
+eslint 0, build 0. Checker also found+fixed a usability bug (long Students toolbar clipped controls →
+`overflowX:auto`). Also fixed 2 latent eslint errors in `theme/themes.ts` (Iteration-7 leftover; a prior
+piped lint check had masked them). New tests: `iteration8_clusterA_layout.test.tsx` (25).
+- [x] **8.A1 Furniture palette fills full height** — `FurnitureSidePanel` now `height:100%`/flex column; panel
+  background covers the whole column.
+- [x] **8.A2 Constant bar sizes across modes** — shell `SidePanel` owns a single `SIDE_PANEL_WIDTH=220`; both
+  editors defer (`width:100%`); toolbars `nowrap` + `minHeight:40` so TopBar height is constant; Students
+  toolbar scrolls horizontally at narrow widths instead of clipping.
+
+**Cluster B — Color schemes rework. ✅ COMPLETE 2026-06-25.** Builder + checker; verified suite 1645 green,
+tsc 0, eslint 0, build 0. Checker found+fixed a real legibility bug (secondary/muted text was hardcoded grey →
+now derived from the scheme `text` via opacity, readable on dark schemes) + a 3-char-hex parse bug. New tests:
+`iteration8_clusterB_schemes.test.tsx` (75).
+- [x] **8.B1 Per-file `.json` schemes** in `src/theme/schemes/` (`classic.json`, `purpleGreen.json`), auto-
+  registered via `import.meta.glob` (adding a scheme = drop in a file); `{name,topBar,leftBar,gridBackdrop,text,logo}`
+  mapped to the full palette; CSS-var(DOM)+resolved(canvas) split retained.
+- [x] **8.B2 `text` drives all non-special text** (incl. derived muted/faint variants via `--pj-text`/`--pj-text-muted`/`--pj-text-faint`).
+- [x] **8.B3 `logo`** path → `<img>` (onError → text fallback); null → "Pijon" text.
+- [x] **8.B4 Special text bg `#553726`** (`SPECIAL_TEXT_BG` constant) on Erase-all + Saved-locally, both schemes.
+
+**Cluster C — Import furniture (image + cell size). ✅ COMPLETE 2026-06-26.** Builder + checker; verified suite
+1700 green, tsc 0, eslint 0, build 0. No source defects (checker added 7 tests). New tests:
+`iteration8_clusterC_importFurniture.test.tsx`. (Builder hit a session limit; conductor finished the test-file
+TS/lint cleanup — `global`→`globalThis`, indexed-access guards, getByTestId generics.)
+- [x] **8.C1 Import furniture** — control at the bottom of the furniture palette (mirrors roster Import-CSV);
+  upload image (FileReader→data URL) + X/Y units → a `CustomFurnitureDef` in `Classroom.customPalette` (persisted),
+  draggable into the grid placing a `Furniture` with `imageUrl` + footprint. New `'custom'` kind is capacity-0
+  (decorative, not seatable); `drawFurniture` uses `imageUrl` when present; backward-compatible persistence.
+
+**Cluster D — Project finalization. ✅ COMPLETE 2026-06-26** (3 verified passes; see `docs/FINALIZATION_AUDIT.md`).
+Verified suite 1719 green, tsc 0, eslint 0, build 0 (root + `--base=/pijon/`). New tests:
+`iteration8_clusterD_furnitureColors.test.ts`, `iteration8_clusterD_constants.test.ts`.
+- [x] **8.D1 Dead/unused code** — removed dead tab color tokens; audited unused exports (uncertain-dead listed,
+  not force-removed). Earlier `EditorSwitcher` already removed.
+- [x] **8.D2 Duplication → helpers** — shared `fillForFurnitureKind`/`strokeForFurnitureKind` (render + editor);
+  A2/A3 candidates deferred with rationale (legitimate behavioral differences / structural).
+- [x] **8.D3 Magic values → named constants** — `DEBOUNCE_WRITE_MS`, `BADGE_SIZE_RATIO`/`BADGE_MIN_PX`, `PULSE_*`,
+  `CANVAS_CARD_PADDING` (values pinned by tests).
+- [x] **8.D4 Comments** — targeted JSDoc added to non-obvious blocks (cache invalidation, bidirectional violation
+  semantics, coordinate transforms, paint-layer order, etc.); codebase was already heavily commented.
+- [x] **8.D5 File-structure review** — evaluated; the two large editors carry module-level shared state, so splits
+  are risky. Concrete target structure + migration steps DOCUMENTED in the audit for deliberate maintainer action
+  (deferred rather than risked). Graphical-update ease already strong (drop-in `.json` schemes, scheme logo, central colors).
+- [x] **8.D6 Dependencies** — package.json verified clean (all imports declared; correct dep/devDep split; `npm ls` ok).
+- [x] **8.D7 GitHub Pages readiness** — asset paths route through `import.meta.env.BASE_URL`; PWA manifest paths made
+  relative + `scope`; `vite.config.ts` documents `base: '/<repo>/'`. Verified `vite build --base=/pijon/` rewrites all paths.
+
+> **Iteration 8 COMPLETE (2026-06-26).** A (layout: full-height palette + constant-size bars), B (color schemes as
+> drop-in `.json` files + logo + special-text bg + themed text), C (import furniture: image + cell size), D
+> (finalization: dead-code/dedup/constants/comments/deps/gh-pages + documented structure plan). Suite: **1719 tests
+> green**, tsc 0, eslint 0, build 0 (root + project subpath). Also fixed 2 latent Iteration-7 lint errors.
+
+### Iteration 9 — minor fixes (2026-06-26)
+
+- [x] **9.1 Gap around the whole site** — there was no global CSS reset, so the browser default
+  `body { margin: 8px }` left an ugly gap (and scrollbar) around the full-viewport shell. Added
+  `src/index.css` (zero margin/padding + full height on html/body/#root), imported in `main.tsx`.
+  Kept minimal (no global box-sizing change, to avoid shifting the app's explicitly-sized panels).
+  Fixed inline (trivial CSS) — suite 1719 green, tsc 0, eslint 0, build 0.
+
+### Iteration 10 — round-8 feedback (processed from feedback.txt, 2026-06-26)
+
+Conductor translation; builder + checker per cluster; sequential (shared theme/shell files).
+
+**Bug (fixed inline 2026-06-26):**
+- [x] **10.0 Allocate dropdown clipped/"behind" other stuff.** Root cause was NOT z-index (already 1100) — the
+  Students toolbar row has `overflowY:hidden` (Iteration-8 height-stability fix), which clipped the absolutely-
+  positioned menu. Fix: menu now `position:fixed` anchored to the button's on-screen rect (escapes ancestor
+  overflow clipping; node stays in DOM so click-outside still works). Suite 1719 green, tsc 0, eslint 0.
+
+**Cluster A — Theming breadth. ✅ COMPLETE 2026-06-26.** Builder + checker; verified suite 1828 green, tsc 0,
+eslint 0, build 0. Checker closed two builder gaps: routed CANVAS selection/drag accents through the themed
+`selectedBox` (via `rgbaFromHex` helper) so canvas highlights follow the scheme, and wired **live canvas repaint
+on theme switch** (ClassroomCanvas subscribes to `themeId`). New tests: `iteration10_clusterA.test.tsx` (71) +
+`iteration10_clusterB.test.tsx` (38). Classic kept visually identical (two near-identical blues unified to `#1565c0`).
+- [x] **10.A1 `text` applied broadly** — canvas student names + Settings menu text use the scheme text color.
+- [x] **10.A2 Settings menu themed** — header = `topBar`, body = `gridBackdrop`, text = scheme `text`.
+- [x] **10.A3 `selectedBox`** (classic `#1565c0`, purpleGreen `#793498`) — DOM accent tokens + canvas selection/drag accents.
+- [x] **10.A4 `unselectedBox`** (classic `#ffffff`, purpleGreen `#371e42`) — base box/button surfaces. DOM CSS-var + canvas resolved.
+
+**Cluster B — Scroll/zoom anywhere behind the grid. ✅ COMPLETE 2026-06-26.** Builder + checker; verified suite
+1854 green, tsc 0, eslint 0, build 0. New tests: `iteration10_clusterB_scrollZoom.test.tsx` (26).
+- [x] **10.B1** Wheel zoom now attaches to the canvas-area **backdrop** container via `wheelTargetRef` (App passes
+  a ref), so it works anywhere behind the grid; top bar + left panel are siblings outside the backdrop and are
+  **excluded** (checker-tested). Single listener (no double-handling); back-compat preserved (canvas fallback).
+  **INTERPRETATION:** "have the grid scroll" = the existing wheel *zoom* works across the whole backdrop (no pan
+  implemented; zoom-out always recovers off-screen furniture — checker confirmed acceptable). Revisit if the user
+  meant literal drag-to-pan.
+
+> **Iteration 10 COMPLETE (2026-06-26).** Bug 10.0 (allocate dropdown overflow-clip → fixed position). Cluster A
+> (theme breadth: `selectedBox`/`unselectedBox` scheme values + canvas accents, broad `text` incl. canvas student
+> names, themed Settings menu, live canvas repaint on theme switch). Cluster B (wheel-zoom anywhere behind the
+> grid). Suite: **1854 tests green**, tsc 0, eslint 0, build 0.
+
+### Iteration 11 — round-9 feedback (processed from feedback.txt, 2026-06-27)
+
+Conductor translation; builder + checker per cluster; sequential (shared theme/shell files).
+
+**Cluster A — More configurable scheme colors + top-bar-right region.** Files: `theme/schemes/*.json`,
+`theme/themes.ts`/`colors.ts`, `ui/shell/TopBar.tsx`, `ui/canvas/render.ts` + `ui/editors/StudentEditor.tsx`
+(canvas student name + grid background).
+- [ ] **11.A1 `buttonText` scheme value** — button text gets its OWN configurable color (currently it follows
+  general `text` / is off). Route button-text tokens to `--pj-buttonText`; legible per scheme.
+- [ ] **11.A2 `studentName` scheme value** — canvas student names get their OWN color (currently routed to
+  `text`, looks bad). **Black** in both schemes. (Reverses 10.A1's name→text routing.)
+- [ ] **11.A3 `gridBackground` scheme value** — the fill INSIDE the grid is configurable; **white** in both
+  schemes (distinct from `gridBackdrop`, the area around the grid). Canvas reads it from the resolved palette.
+- [x] **11.A4 `topBarRight` region** — trailing group (Settings · Saved-locally · Erase all) wrapped in a
+  region with its own `topBarRight` background + a **divider**; Erase/Saved backgrounds now **transparent**;
+  `#553726`/`SPECIAL_TEXT_BG` removed. Default `topBarRight` = each scheme's `topBar`.
+- [x] **11.A5 `topBarRightText`** (checker-added) — the text/border color for that region; legible (WCAG AA) on
+  the `topBarRight` surface in both schemes (classic `#333`, purpleGreen `#ffffff`). Fixed a real bug where the
+  old hardcoded red Erase text was ~1.15:1 contrast (invisible) on the purple bar.
+
+**Cluster A ✅ COMPLETE 2026-06-27.** Builder + checker; verified suite 1936 green, tsc 0, eslint 0, build 0.
+New scheme values: `buttonText`, `studentName` (black both), `gridBackground` (white both), `topBarRight`,
+`topBarRightText`. Dead `SPECIAL_TEXT_BG` removed. Tests: `iteration11_clusterA.test.tsx` (82) + updates.
+- [x] **11.A1 `buttonText`** (classic `#333`, purpleGreen `#f0e8f5`) — button text its own configurable color.
+- [x] **11.A2 `studentName`** — canvas student names own color, **black** both schemes (no longer `text`).
+- [x] **11.A3 `gridBackground`** — explicit scheme value, **white** both (distinct from `gridBackdrop`).
+
+**Cluster B — Editor toggle layout `[Furniture | lever | Students]`. ✅ COMPLETE 2026-06-27.**
+Builder + checker; verified suite 1984 green, tsc 0, eslint 0, build 0. New tests: `iteration11_clusterB.test.tsx`
+(48; checker added 11 incl. lever-knob-position + DOM-order + themed-accent + idempotency). No source defects.
+Files: `ui/shell/TopBar.tsx` only (ToggleLever API unchanged; assigner lever unchanged).
+Approach: composed flanking labels in TopBar around the existing ToggleLever (no API change to ToggleLever).
+Furniture = lever OFF/left; Students = lever ON/right. Active side bold + selectedBox accent (tabActiveBorder =
+`var(--pj-selectedBox)`); inactive side textMuted. Side labels are clickable buttons (testids `editor-mode-furniture` /
+`editor-mode-students`); lever button keeps testid `editor-mode-lever` + aria-pressed. Updated A5/A5b in
+`iteration7_topbar.test.tsx` (old tests checked label inside the lever button; now labels are separate siblings).
+- [x] **11.B1** Render the Furniture/Students toggle as **`Furniture [lever] Students`** — a label on EACH side
+  of the lever (like a physical switch), instead of one label that changes (`[lever furniture]`). The active
+  side is emphasized; clicking/toggling still calls `setActiveEditorId`. Keep the shared-lever look consistent
+  with the assigner lever where it makes sense (may need a labelled variant). Tests + checker.
+
+> **Iteration 11 COMPLETE (2026-06-27).** A (configurable `buttonText`, `studentName` black, `gridBackground`
+> white, `topBarRight` region + `topBarRightText`; Erase/Saved backgrounds transparent; removed `#553726`;
+> checker fixed an invisible-text contrast bug on the purple bar), B (`Furniture [lever] Students` toggle).
+> Suite: **1984 tests green**, tsc 0, eslint 0, build 0.
+
+### Iteration 12 — round-10 feedback (theming bugs, 2026-06-27)
+
+All bug fixes to existing theming (no outline change). One cluster, builder + checker.
+
+**Cluster A — Theme application correctness.** Files: `theme/themes.ts`, `state/store.ts`, `ui/App.tsx`,
+`ui/shell/TopBar.tsx`, `ui/editors/FurnitureEditor.tsx`/`StudentEditor.tsx` (toolbar button text), `ui/canvas/ClassroomCanvas.tsx`.
+- [ ] **12.A1 Toolbar button text not using `buttonText`** — the Furniture toolbar buttons (New/Clear/Save/Load)
+  and Student toolbar buttons (Clear/Undo/Redo/Export/Import) don't pick up the scheme `buttonText` color.
+  Route their text to the themed `buttonText` token.
+- [ ] **12.A2 Theme not fully applied on load (must toggle to apply) — CORE BUG.** On first load the persisted
+  theme isn't fully applied — DOM may theme but the CANVAS (student names, grid) doesn't until you switch themes
+  back and forth. Root cause likely: the module-level resolved palette (`_activeTheme` / `getActiveThemeColors`)
+  is not initialized to the persisted `themeId` on startup (only `setTheme` updates it), so first paint uses the
+  default palette. Fix init so the persisted theme is FULLY applied on mount — DOM vars (`applyThemeVars`) AND the
+  canvas resolved palette (`_setActiveThemeInternal`) AND a canvas repaint — with no toggle needed. Add a test
+  that a persisted non-default theme is reflected on first render (DOM + canvas) without calling setTheme.
+- [ ] **12.A3 Roster student names → scheme `text`.** The roster list (left panel, DOM) student names should use
+  the scheme `text` color (canvas grid names stay `studentName` black — that's separate). Tests + checker.
 
 ## Deferred tests (write later)
 

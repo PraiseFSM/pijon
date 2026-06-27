@@ -32,6 +32,7 @@
  *   image is stretched to cover the entire grid area.
  */
 
+import type { FurnitureKind } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
 import { occupant, isFixture } from '../../domain/furniture.js';
 import type { Classroom } from '../../domain/classroom.js';
@@ -45,7 +46,6 @@ import {
   furnitureFillWhiteboard,
   furnitureStroke,
   furnitureStrokeFixture,
-  occupantNameStudent,
   occupantNameFixture,
   lockTint,
 } from '../../theme/colors.js';
@@ -206,19 +206,27 @@ export function drawGrid(
 // drawFurniture
 // ---------------------------------------------------------------------------
 
-/** Pick the fill colour for a piece of furniture by its kind. */
-function fillForFurniture(f: Furniture): string {
-  switch (f.kind) {
+/**
+ * Pick the fill colour for a furniture kind.
+ * Exported so editor overlays (e.g. FurnitureEditor live-drag preview) can
+ * call the same logic and stay visually identical to the base pass.
+ */
+export function fillForFurnitureKind(kind: FurnitureKind): string {
+  switch (kind) {
     case 'single_desk':   return furnitureFillSingleDesk;
     case 'table':         return furnitureFillTable;
     case 'teacher_desk':  return furnitureFillTeacherDesk;
     case 'whiteboard':    return furnitureFillWhiteboard;
+    case 'custom':        return furnitureFillWhiteboard; // neutral fallback for custom
   }
 }
 
-/** Pick the stroke colour — fixtures get a slightly different tone. */
-function strokeForFurniture(f: Furniture): string {
-  if (f.kind === 'teacher_desk' || f.kind === 'whiteboard') {
+/**
+ * Pick the stroke colour for a furniture kind — fixtures get a slightly different tone.
+ * Exported so editor overlays can call the same logic as the base pass.
+ */
+export function strokeForFurnitureKind(kind: FurnitureKind): string {
+  if (kind === 'teacher_desk' || kind === 'whiteboard' || kind === 'custom') {
     return furnitureStrokeFixture;
   }
   return furnitureStroke;
@@ -242,15 +250,17 @@ export function drawSingleFurniture(
 ): void {
   const rect = furnitureToPixelRect(f, cellSize);
 
-  // --- Fill: image if loaded, else kind-color ---
-  const assetUrl = furnitureAssetUrl(f.kind);
-  const img = assetUrl !== undefined ? getImage(assetUrl) : undefined;
+  // --- Fill: §8.C1 imageUrl (data URL) > kind asset > kind color ---
+  // Custom-imported furniture carries a data URL in f.imageUrl.
+  // Data URLs work with `new Image()` / imageCache identically to regular URLs.
+  const imageUrlToUse: string | undefined = f.imageUrl ?? furnitureAssetUrl(f.kind);
+  const img = imageUrlToUse !== undefined ? getImage(imageUrlToUse) : undefined;
 
   if (img !== undefined) {
     // Draw the image stretched to fit the furniture bounding rect
     ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h);
   } else {
-    ctx.fillStyle = fillForFurniture(f);
+    ctx.fillStyle = fillForFurnitureKind(f.kind);
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   }
 
@@ -261,7 +271,7 @@ export function drawSingleFurniture(
   }
 
   // --- Stroke (always on top) ---
-  ctx.strokeStyle = strokeForFurniture(f);
+  ctx.strokeStyle = strokeForFurnitureKind(f.kind);
   ctx.lineWidth = 1.5;
   ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
 }
@@ -348,7 +358,12 @@ export function drawOccupants(
 
     const fixture = isFixture(f);
 
-    ctx.fillStyle = fixture ? occupantNameFixture : occupantNameStudent;
+    // §11.A2 — Real student names use the scheme's studentName color (black in both
+    // shipped schemes) for clear readability on the desk surface.
+    // §10.A1 reversal: we no longer use `text` for student names — studentName
+    // is its own configurable value (black by default, regardless of surface tone).
+    // Fixture labels keep their distinct italic-purple style (exempt from scheme).
+    ctx.fillStyle = fixture ? occupantNameFixture : getActiveThemeColors().studentName;
     ctx.font = fixture
       ? `italic ${fontSize.toString()}px sans-serif`
       : `${fontSize.toString()}px sans-serif`;

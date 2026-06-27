@@ -12,6 +12,25 @@ import { VitePWA } from 'vite-plugin-pwa';
 // by `vite build`. There is NO runtime caching that touches external origins —
 // everything served is from the same bundle. This satisfies "data never leaves
 // the device" (Design Goal 1) and "works offline" (Design Goal 2).
+//
+// §8.D7 — GitHub Pages readiness:
+// To host on a GitHub Pages PROJECT site (username.github.io/<repo>/), set:
+//
+//   base: '/<repo>/',   // e.g. base: '/pijon/'
+//
+// just before the `plugins` key.  Leave it unset (defaults to '/') for root
+// deployments (Netlify, Cloudflare Pages, custom domain, org/user GH Pages).
+// See README.md §"GitHub Pages project sites" for full instructions.
+//
+// When `base` is set, Vite rewrites all JS/CSS asset references automatically.
+// The asset paths in src/assets/paths.ts use import.meta.env.BASE_URL (also
+// injected by Vite) so public/ images resolve correctly too.
+//
+// PWA manifest notes for non-root bases:
+//   • start_url uses './' so it is relative to wherever the manifest is served,
+//     making it correct for both root and subpath deployments.
+//   • Icon src paths use './' for the same reason. vite-plugin-pwa resolves them
+//     against the build base automatically.
 export default defineConfig({
   plugins: [
     react(),
@@ -38,23 +57,29 @@ export default defineConfig({
         short_name: 'Pijon',
         description:
           'Local-first classroom seating tool — build your layout, seat your students, nothing leaves your device.',
-        start_url: '/',
+        // §8.D7: './' (relative to the manifest) works for both root and
+        // subpath deployments. Absolute '/' would point at the origin root,
+        // causing a 404 for project-site bases like /pijon/.
+        start_url: './',
+        scope: './',
         display: 'standalone',
         background_color: '#ffffff',
         theme_color: '#4f46e5',
         icons: [
           {
-            src: '/icon-192.png',
+            // §8.D7: relative paths — vite-plugin-pwa prefixes them with the
+            // build base so they resolve correctly under any deployment path.
+            src: './icon-192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/icon-512.png',
+            src: './icon-512.png',
             sizes: '512x512',
             type: 'image/png',
           },
           {
-            src: '/icon-maskable-512.png',
+            src: './icon-maskable-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',

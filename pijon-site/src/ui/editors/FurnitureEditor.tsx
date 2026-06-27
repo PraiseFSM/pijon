@@ -45,8 +45,10 @@ import { resizeButtonRects, hitButton, ghostRingCells, type ResizeButton } from 
 import { usePijonStore } from '../../state/store.js';
 import { getImage } from '../canvas/imageCache.js';
 import { furnitureAssetUrl } from '../../assets/paths.js';
+import { fillForFurnitureKind, strokeForFurnitureKind } from '../canvas/render.js';
 import { makeClassroom, canRemoveEdge, granularityConflicts } from '../../domain/classroom.js';
 import type { Classroom, GranularityConflict } from '../../domain/classroom.js';
+import { getActiveThemeColors, rgbaFromHex } from '../../theme/themes.js';
 
 /**
  * 5.A1 — Filter the resize buttons so a MINUS (remove) button is shown only at
@@ -73,6 +75,7 @@ import {
   textPlaceholder,
   btnBackground,
   btnBorder,
+  btnText,
   bannerWarningBackground,
   bannerWarningBorder,
   bannerWarningText,
@@ -82,21 +85,13 @@ import {
   sidePanelBackground,
   panelBorder,
   sidePanelHeaderText,
-  selectionStroke,
   gridDragOriginFade,
-  gridDragValidStroke,
   gridDragInvalidFill,
   gridDragInvalidStroke,
-  dragPreviewValidStroke,
   dragPreviewInvalidFill,
   dragPreviewInvalidStroke,
   dropCollisionFlashFill,
   furnitureFillSingleDesk,
-  furnitureFillTable,
-  furnitureFillTeacherDesk,
-  furnitureFillWhiteboard,
-  furnitureStroke,
-  furnitureStrokeFixture,
   ghostRingCellFill,
   ghostRingCellStroke,
   ghostRingPlusButtonFill,
@@ -125,6 +120,12 @@ import {
  */
 let _transparentDragImage: HTMLCanvasElement | null = null;
 
+/**
+ * Return the shared transparent drag-image canvas, creating it on first call.
+ * Passing this to `e.dataTransfer.setDragImage(img, 0, 0)` in onDragStart
+ * suppresses the browser's default ghost (a snapshot of the dragged element)
+ * so only our custom canvas overlay is visible during the drag.
+ */
 function getTransparentDragImage(): HTMLCanvasElement {
   if (_transparentDragImage === null) {
     const canvas = document.createElement('canvas');
@@ -183,10 +184,16 @@ function makeFurniture(kind: FurnitureKind, pos: Vec2, cellsPerUnit = 1): Furnit
 }
 
 // ---------------------------------------------------------------------------
-// dataTransfer key for palette drag
+// dataTransfer keys for palette drags
 // ---------------------------------------------------------------------------
 
 export const DRAG_KIND_KEY = 'application/x-pijon-furniture-kind';
+
+/**
+ * §8.C1 — dataTransfer key used when dragging a custom palette item.
+ * Carries the def id (not the image URL which may be very large).
+ */
+export const DRAG_CUSTOM_DEF_ID_KEY = 'application/x-pijon-custom-def-id';
 
 // ---------------------------------------------------------------------------
 // §13.1 — Cross-browser dragstart kind stash
@@ -222,10 +229,39 @@ export function readDraggedKind(e: DragEvent): string {
 }
 
 // ---------------------------------------------------------------------------
+// §8.C1 — Custom-def drag stash (parallel to kind stash above)
+// ---------------------------------------------------------------------------
+
+let _draggedCustomDefIdStash = '';
+
+/** Stash the custom def id on dragstart so dragover can read it in Firefox/Safari. */
+export function stashDraggedCustomDefId(defId: string): void {
+  _draggedCustomDefIdStash = defId;
+}
+
+/** Clear on dragend / drop. */
+export function clearDraggedCustomDefIdStash(): void {
+  _draggedCustomDefIdStash = '';
+}
+
+/**
+ * Read the dragged custom def id, with the module-level stash fallback.
+ */
+export function readDraggedCustomDefId(e: DragEvent): string {
+  let id = e.dataTransfer?.getData(DRAG_CUSTOM_DEF_ID_KEY) ?? '';
+  if (!id) id = _draggedCustomDefIdStash;
+  return id;
+}
+
+// ---------------------------------------------------------------------------
 // Collision helper (port of classroom_builder.py check_collision)
 // ---------------------------------------------------------------------------
 
-/** Build a set of "col,row" strings for fast intersection tests. */
+/**
+ * Convert a Vec2 array to a Set of "x,y" strings for O(1) intersection tests.
+ * Used by hasCollision to compare the candidate footprint against each existing
+ * furniture's occupied cells without nested-loop overhead.
+ */
 function cellSet(cells: Vec2[]): Set<string> {
   const s = new Set<string>();
   for (const c of cells) {
@@ -369,6 +405,8 @@ let paletteDragPreview: {
   h: number;
   /** True = fits (no collision, in bounds); False = red warning. */
   valid: boolean;
+  /** §8.C1 — data URL for custom-imported furniture drag preview (null for built-ins). */
+  imageUrl?: string | null;
 } | null = null;
 
 // ---------------------------------------------------------------------------
@@ -543,6 +581,10 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
     borderRadius: 4,
     border: `1px solid ${btnBorder}`,
     background: btnBackground,
+    // §12.A1 — Route button text color to the themed buttonText token so it
+    // updates correctly when the active scheme changes (e.g. purpleGreen uses
+    // near-white text on its dark button surfaces).
+    color: btnText,
     cursor: 'pointer',
     fontSize: '0.82rem',
     lineHeight: '1.4',
@@ -620,14 +662,17 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
         </div>
       )}
 
-      {/* Main toolbar row */}
+      {/* Main toolbar row — §8.A2: nowrap + minHeight keep this row a constant
+           single-line height so the TopBar never jumps on mode switch. */}
       <div
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
+          flexWrap: 'nowrap',
           alignItems: 'center',
           gap: 4,
           padding: '5px 10px',
+          minHeight: 40,
+          overflow: 'hidden',
         }}
       >
         <button style={btn} onClick={handleNew} type="button">New</button>
@@ -686,8 +731,23 @@ const FurnitureToolbar: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
 // SidePanel — furniture palette
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => {
+/** §8.C1 — Validation constants for custom palette import. */
+const CUSTOM_PALETTE_MAX_UNITS = 20; // max w/h in units
+const CUSTOM_PALETTE_MIN_UNITS = 1;  // min w/h in units
+
+const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx }) => {
+  // §8.C1 — Import furniture local state
+  const importFileRef = React.useRef<HTMLInputElement | null>(null);
+  const [importName, setImportName] = useState<string>('');
+  const [importW, setImportW] = useState<number>(2);
+  const [importH, setImportH] = useState<number>(2);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
+  const [pendingImageName, setPendingImageName] = useState<string>('');
+
+  // Read customPalette from store (reactive via ctx.store)
+  const customPalette = ctx.store.classroom.customPalette ?? [];
+
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, kind: FurnitureKind) => {
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData(DRAG_KIND_KEY, kind);
@@ -704,6 +764,88 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
     e.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
   };
 
+  // §8.C1 — Handle drag start for a custom palette entry
+  const handleCustomDragStart = (e: React.DragEvent<HTMLDivElement>, defId: string) => {
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData(DRAG_CUSTOM_DEF_ID_KEY, defId);
+    stashDraggedCustomDefId(defId);
+    e.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
+  };
+
+  // §8.C1 — Handle image file selection
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file === undefined) return;
+
+    // Validate: must be an image type
+    if (!file.type.startsWith('image/')) {
+      setImportError('Please choose an image file (PNG, JPG, GIF, SVG, etc.).');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result;
+      if (typeof dataUrl !== 'string') {
+        setImportError('Could not read the image file.');
+        return;
+      }
+      setPendingImageUrl(dataUrl);
+      // Derive a default name from the filename (sans extension)
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      setPendingImageName(baseName);
+      if (importName.trim() === '') {
+        setImportName(baseName);
+      }
+      setImportError(null);
+    };
+    reader.onerror = () => {
+      setImportError('Could not read the image file.');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // §8.C1 — Validate and add the custom furniture def
+  const handleAddCustom = () => {
+    if (pendingImageUrl === null) {
+      setImportError('Choose an image first.');
+      return;
+    }
+    const name = importName.trim() !== '' ? importName.trim() : pendingImageName.trim();
+    if (name === '') {
+      setImportError('Enter a name for the furniture.');
+      return;
+    }
+    const wVal = Math.round(importW);
+    const hVal = Math.round(importH);
+    if (!Number.isInteger(wVal) || wVal < CUSTOM_PALETTE_MIN_UNITS || wVal > CUSTOM_PALETTE_MAX_UNITS) {
+      setImportError(`Width must be an integer from ${CUSTOM_PALETTE_MIN_UNITS.toString()} to ${CUSTOM_PALETTE_MAX_UNITS.toString()}.`);
+      return;
+    }
+    if (!Number.isInteger(hVal) || hVal < CUSTOM_PALETTE_MIN_UNITS || hVal > CUSTOM_PALETTE_MAX_UNITS) {
+      setImportError(`Height must be an integer from ${CUSTOM_PALETTE_MIN_UNITS.toString()} to ${CUSTOM_PALETTE_MAX_UNITS.toString()}.`);
+      return;
+    }
+
+    ctx.store.addCustomFurnitureDef({
+      id: crypto.randomUUID(),
+      name,
+      imageUrl: pendingImageUrl,
+      wUnits: wVal,
+      hUnits: hVal,
+    });
+
+    // Reset form
+    setPendingImageUrl(null);
+    setPendingImageName('');
+    setImportName('');
+    setImportW(2);
+    setImportH(2);
+    setImportError(null);
+  };
+
   const itemStyle: React.CSSProperties = {
     padding: '10px 12px',
     marginBottom: 6,
@@ -716,109 +858,318 @@ const FurnitureSidePanel: React.FC<{ ctx: EditorContext }> = ({ ctx: _ctx }) => 
     fontWeight: 500,
   };
 
+  const smallInputStyle: React.CSSProperties = {
+    padding: '3px 5px',
+    borderRadius: 3,
+    border: `1px solid ${btnBorder}`,
+    fontSize: '0.78rem',
+    width: 44,
+    textAlign: 'center' as const,
+  };
+
   return (
     <div
       style={{
-        width: 160,
-        padding: '10px 8px',
+        /* §8.A1 — Fill the full height of the shell SidePanel column so the
+         * background covers the entire left bar down to the bottom of the screen.
+         * §8.A2 — Do NOT set a fixed pixel width here; width is controlled by the
+         * shell SidePanel wrapper (SIDE_PANEL_WIDTH constant in SidePanel.tsx). */
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box',
         background: sidePanelBackground,
         borderRight: `1px solid ${panelBorder}`,
-        overflowY: 'auto',
       }}
     >
-      <div
-        style={{
-          fontWeight: 700,
-          fontSize: '0.8rem',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          color: sidePanelHeaderText,
-          marginBottom: 10,
-        }}
-      >
-        Palette
-      </div>
-      {PALETTE_ITEMS.map((item) => {
-        const assetUrl = furnitureAssetUrl(item.kind);
-        return (
+      {/* Scrollable palette area */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 8px' }}>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: '0.8rem',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            color: sidePanelHeaderText,
+            marginBottom: 10,
+          }}
+        >
+          Palette
+        </div>
+
+        {/* Built-in palette items */}
+        {PALETTE_ITEMS.map((item) => {
+          const assetUrl = furnitureAssetUrl(item.kind);
+          return (
+            <div
+              key={item.kind}
+              draggable
+              onDragStart={(e) => {
+                handleDragStart(e, item.kind);
+              }}
+              style={{
+                ...itemStyle,
+                background: furnitureFillByKind[item.kind] ?? furnitureFillSingleDesk,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              title={`Drag onto the grid to place a ${item.label}`}
+            >
+              {/* §14.3 — Show the furniture image asset in the palette item when available */}
+              {assetUrl !== undefined && (
+                <img
+                  src={assetUrl}
+                  alt=""
+                  aria-hidden="true"
+                  width={24}
+                  height={24}
+                  style={{ objectFit: 'contain', borderRadius: 2, flexShrink: 0 }}
+                />
+              )}
+              <div>
+                {item.label}
+                <div style={{ fontSize: '0.7rem', color: textFainter, fontWeight: 400 }}>
+                  {item.w}×{item.h}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* §8.C1 — Custom palette items (teacher-imported) */}
+        {customPalette.length > 0 && (
           <div
-            key={item.kind}
-            draggable
-            onDragStart={(e) => {
-              handleDragStart(e, item.kind);
+            style={{
+              marginTop: 10,
+              marginBottom: 4,
+              fontWeight: 700,
+              fontSize: '0.72rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              color: sidePanelHeaderText,
             }}
+          >
+            Custom
+          </div>
+        )}
+        {customPalette.map((def) => (
+          <div
+            key={def.id}
+            draggable
+            onDragStart={(e) => { handleCustomDragStart(e, def.id); }}
+            data-testid={`custom-palette-item-${def.id}`}
             style={{
               ...itemStyle,
-              background: furnitureFillByKind[item.kind] ?? furnitureFillSingleDesk,
+              background: '#f5f5f5',
               display: 'flex',
               alignItems: 'center',
               gap: 6,
+              justifyContent: 'space-between',
             }}
-            title={`Drag onto the grid to place a ${item.label}`}
+            title={`Drag onto the grid to place ${def.name} (${def.wUnits.toString()}×${def.hUnits.toString()} units)`}
           >
-            {/* §14.3 — Show the furniture image asset in the palette item when available */}
-            {assetUrl !== undefined && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
               <img
-                src={assetUrl}
+                src={def.imageUrl}
                 alt=""
                 aria-hidden="true"
                 width={24}
                 height={24}
                 style={{ objectFit: 'contain', borderRadius: 2, flexShrink: 0 }}
               />
-            )}
-            <div>
-              {item.label}
-              <div style={{ fontSize: '0.7rem', color: textFainter, fontWeight: 400 }}>
-                {item.w}×{item.h}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {def.name}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: textFainter, fontWeight: 400 }}>
+                  {def.wUnits}×{def.hUnits}
+                </div>
               </div>
             </div>
+            <button
+              type="button"
+              data-testid={`custom-palette-remove-${def.id}`}
+              onClick={() => { ctx.store.removeCustomFurnitureDef(def.id); }}
+              title="Remove from palette"
+              style={{
+                flexShrink: 0,
+                padding: '1px 5px',
+                borderRadius: 3,
+                border: `1px solid ${btnBorder}`,
+                background: 'transparent',
+                cursor: 'pointer',
+                fontSize: '0.72rem',
+                color: textMedium,
+              }}
+            >
+              ✕
+            </button>
           </div>
-        );
-      })}
+        ))}
+
+        <div
+          style={{
+            marginTop: 16,
+            fontSize: '0.72rem',
+            color: textPlaceholder,
+            lineHeight: 1.4,
+          }}
+        >
+          Drag to place.
+          <br />
+          Click-drag on grid to move.
+          <br />
+          Delete to remove.
+        </div>
+      </div>
+
+      {/* §8.C1 — Import Furniture — bottom-most control (mirrors Import CSV placement) */}
       <div
+        data-testid="import-furniture-section"
         style={{
-          marginTop: 16,
-          fontSize: '0.72rem',
-          color: textPlaceholder,
-          lineHeight: 1.4,
+          borderTop: `1px solid ${panelBorder}`,
+          padding: '8px 8px 10px',
         }}
       >
-        Drag to place.
-        <br />
-        Click-drag on grid to move.
-        <br />
-        Delete to remove.
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: '0.72rem',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            color: sidePanelHeaderText,
+            marginBottom: 6,
+          }}
+        >
+          Import furniture
+        </div>
+
+        {/* Hidden file input */}
+        <input
+          ref={importFileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={handleImageFileChange}
+          data-testid="import-furniture-file-input"
+        />
+
+        {/* Image picker button */}
+        <button
+          type="button"
+          onClick={() => { importFileRef.current?.click(); }}
+          data-testid="import-furniture-pick-image"
+          style={{
+            width: '100%',
+            padding: '4px 8px',
+            borderRadius: 4,
+            border: `1px solid ${btnBorder}`,
+            background: btnBackground,
+            cursor: 'pointer',
+            fontSize: '0.78rem',
+            marginBottom: 5,
+            textAlign: 'left',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title="Choose an image from your device — read locally, never uploaded"
+        >
+          {pendingImageUrl !== null
+            ? (pendingImageName !== '' ? pendingImageName : 'Image chosen')
+            : 'Choose image…'}
+        </button>
+
+        {/* Name input */}
+        {pendingImageUrl !== null && (
+          <>
+            <input
+              type="text"
+              value={importName}
+              onChange={(e) => { setImportName(e.target.value); }}
+              placeholder="Name…"
+              aria-label="Custom furniture name"
+              data-testid="import-furniture-name"
+              style={{
+                width: '100%',
+                padding: '3px 6px',
+                borderRadius: 4,
+                border: `1px solid ${btnBorder}`,
+                fontSize: '0.78rem',
+                boxSizing: 'border-box',
+                marginBottom: 4,
+              }}
+            />
+
+            {/* Size inputs */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 5, fontSize: '0.78rem', color: textMedium }}>
+              <span>Size:</span>
+              <input
+                type="number"
+                min={CUSTOM_PALETTE_MIN_UNITS}
+                max={CUSTOM_PALETTE_MAX_UNITS}
+                value={importW}
+                onChange={(e) => { setImportW(parseInt(e.target.value, 10) || 1); }}
+                aria-label="Width in units"
+                data-testid="import-furniture-width"
+                style={smallInputStyle}
+              />
+              <span>×</span>
+              <input
+                type="number"
+                min={CUSTOM_PALETTE_MIN_UNITS}
+                max={CUSTOM_PALETTE_MAX_UNITS}
+                value={importH}
+                onChange={(e) => { setImportH(parseInt(e.target.value, 10) || 1); }}
+                aria-label="Height in units"
+                data-testid="import-furniture-height"
+                style={smallInputStyle}
+              />
+              <span style={{ color: textFaint }}>units</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddCustom}
+              data-testid="import-furniture-add"
+              style={{
+                width: '100%',
+                padding: '4px 8px',
+                borderRadius: 4,
+                border: `1px solid ${btnBorder}`,
+                background: btnBackground,
+                cursor: 'pointer',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+              }}
+            >
+              Add to palette
+            </button>
+          </>
+        )}
+
+        {/* Error message */}
+        {importError !== null && (
+          <div
+            data-testid="import-furniture-error"
+            style={{ marginTop: 4, fontSize: '0.72rem', color: '#c00' }}
+          >
+            {importError}
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-// ---------------------------------------------------------------------------
-// §13.1 — Furniture fill-colour helpers (mirror render.ts so the live preview
-// looks identical to the base-pass furniture)
-// ---------------------------------------------------------------------------
-
-/** Fill colour for each furniture kind — sourced from colors.ts (mirrors render.ts). */
-function kindFillColor(kind: FurnitureKind): string {
-  switch (kind) {
-    case 'single_desk':   return furnitureFillSingleDesk;
-    case 'table':         return furnitureFillTable;
-    case 'teacher_desk':  return furnitureFillTeacherDesk;
-    case 'whiteboard':    return furnitureFillWhiteboard;
-  }
-}
-
-/** Stroke colour — sourced from colors.ts, mirrors render.ts strokeForFurniture logic. */
-function kindStrokeColor(kind: FurnitureKind): string {
-  if (kind === 'teacher_desk' || kind === 'whiteboard') return furnitureStrokeFixture;
-  return furnitureStroke;
-}
-
 /**
  * Draw the furniture kind as a filled+stroked rectangle at pixel rect r.
  * §14.3: uses the image asset for this kind when loaded (matches render.ts base pass).
- * Falls back to the kind-color fill when the image is not yet loaded.
+ * §8.C1: when `imageUrl` is provided (data URL for custom furniture), that image
+ * takes priority over the kind asset — mirrors render.ts drawSingleFurniture logic.
+ * Falls back to the kind-color fill when no image is loaded.
  * This keeps the live-drag preview visually identical to placed furniture.
  */
 function paintFurnitureRect(
@@ -826,22 +1177,23 @@ function paintFurnitureRect(
   kind: FurnitureKind,
   r: { x: number; y: number; w: number; h: number },
   alpha = 1.0,
+  imageUrl?: string | null,
 ): void {
   ctx2d.save();
   ctx2d.globalAlpha = alpha;
 
-  // §14.3 — Use image if loaded, else color fallback
-  const assetUrl = furnitureAssetUrl(kind);
-  const img = assetUrl !== undefined ? getImage(assetUrl) : undefined;
+  // §8.C1 — imageUrl (data URL) takes priority over the kind asset
+  const urlToUse: string | undefined = imageUrl ?? furnitureAssetUrl(kind);
+  const img = urlToUse !== undefined ? getImage(urlToUse) : undefined;
 
   if (img !== undefined) {
     ctx2d.drawImage(img, r.x, r.y, r.w, r.h);
   } else {
-    ctx2d.fillStyle = kindFillColor(kind);
+    ctx2d.fillStyle = fillForFurnitureKind(kind);
     ctx2d.fillRect(r.x, r.y, r.w, r.h);
   }
 
-  ctx2d.strokeStyle = kindStrokeColor(kind);
+  ctx2d.strokeStyle = strokeForFurnitureKind(kind);
   ctx2d.lineWidth = 1.5;
   ctx2d.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
   ctx2d.restore();
@@ -851,6 +1203,22 @@ function paintFurnitureRect(
 // paintOverlay
 // ---------------------------------------------------------------------------
 
+/**
+ * FurnitureEditor canvas overlay — called by ClassroomCanvas after the base pass.
+ *
+ * Layer order (painter model, back → front):
+ *  1. Ghost ring cells and resize buttons (§14.7) — drawn in raw canvas coords.
+ *  2. Granularity fix-mode highlights: red tint on conflicting pieces, ghost
+ *     copy at the nearest valid position, and an arrow pointing from piece →
+ *     ghost (§6.C2).
+ *  3. Drop-collision flash — red highlight on the piece being blocked.
+ *  4. Move-drag preview — semi-transparent ghost at the current drop position
+ *     (green/valid or red/invalid).
+ *  5. Selection highlight — blue ring around the selected furniture.
+ *
+ * All canvas coordinates match the grid's CSS-pixel space (DPR scaling is
+ * applied by ClassroomCanvas before this is called).
+ */
 function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
   ctx2d.save();
 
@@ -919,8 +1287,10 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
   // --- Selection highlight ---
   // selectedRect is kept in sync with the selected furniture by the pointer/drop handlers.
   // paintOverlay draws only from this pre-computed rect so no store access is needed here.
+  // §10.A3 — use the active scheme's selectedBox so the ring is purple on purpleGreen,
+  // blue on classic (unifying the former static #1976d2 / #1565c0 to one value).
   if (selectedId !== null && dragState === null && selectedRect !== null) {
-    ctx2d.strokeStyle = selectionStroke;
+    ctx2d.strokeStyle = rgbaFromHex(getActiveThemeColors().selectedBox, 0.9);
     ctx2d.lineWidth = 2.5;
     ctx2d.setLineDash([5, 3]);
     ctx2d.strokeRect(
@@ -960,8 +1330,9 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
     paintFurnitureRect(ctx2d, f.kind, r);
 
     // Validity tint — overlay to signal valid/invalid drop position
+    // §10.A3 — derive stroke from active selectedBox for scheme-aware accent
     if (valid) {
-      ctx2d.strokeStyle = gridDragValidStroke;
+      ctx2d.strokeStyle = rgbaFromHex(getActiveThemeColors().selectedBox, 0.9);
       ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     } else {
@@ -976,7 +1347,7 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
   // --- §13.1 Palette drag-over live preview ---
   if (paletteDragPreview !== null) {
     // w and h are already in fine cells (scaled by cellsPerUnit when stored).
-    const { kind, previewPos, valid, w, h } = paletteDragPreview;
+    const { kind, previewPos, valid, w, h, imageUrl: previewImageUrl } = paletteDragPreview;
     const originPx = view.originOffset * view.cellSize;
     const r = {
       x: previewPos.x * view.cellSize + originPx,
@@ -985,12 +1356,12 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
       h: h * view.cellSize,
     };
 
-    // Draw real furniture at drag position
-    paintFurnitureRect(ctx2d, kind, r, 0.85);
+    // Draw real furniture at drag position (§8.C1: pass imageUrl for custom items)
+    paintFurnitureRect(ctx2d, kind, r, 0.85, previewImageUrl);
 
-    // Validity tint
+    // Validity tint — §10.A3 use active selectedBox accent
     if (valid) {
-      ctx2d.strokeStyle = dragPreviewValidStroke;
+      ctx2d.strokeStyle = rgbaFromHex(getActiveThemeColors().selectedBox, 0.85);
       ctx2d.lineWidth = 2.5;
       ctx2d.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     } else {
@@ -1059,7 +1430,7 @@ function paintOverlay(ctx2d: CanvasRenderingContext2D, view: CanvasView): void {
         };
         // Only draw ghost if it's at a different position from current
         if (conflict.to.x !== conflict.from.x || conflict.to.y !== conflict.from.y) {
-          paintFurnitureRect(ctx2d, f.kind, toR, granFixGhostAlpha);
+          paintFurnitureRect(ctx2d, f.kind, toR, granFixGhostAlpha, f.imageUrl);
           ctx2d.save();
           ctx2d.strokeStyle = granFixGhostStroke;
           ctx2d.lineWidth = 2;
@@ -1183,9 +1554,10 @@ export const FurnitureEditor: EditorMode = {
     // §6.C2 — Reset fix mode on deactivate so no artefacts remain
     granFixPendingG = null;
     granFixAutoApplyFn = null;
-    // Clear the cross-browser drag kind stash — important if the teacher switches
+    // Clear the cross-browser drag stashes — important if the teacher switches
     // editors mid-drag (unlikely but guards against any stale state).
     clearDraggedKindStash();
+    clearDraggedCustomDefIdStash();
     repaintFn = null;
   },
 
@@ -1392,8 +1764,64 @@ export const FurnitureEditor: EditorMode = {
 
     // §13.1 — Clear the live preview immediately on drop
     paletteDragPreview = null;
-    // Clear the cross-browser stash — this drag is over
+    // Clear the cross-browser stashes — this drag is over
     clearDraggedKindStash();
+    clearDraggedCustomDefIdStash();
+
+    // §8.C1 — Check first for a custom-def drag (has priority when both keys are set)
+    const customDefId = e.dataTransfer?.getData(DRAG_CUSTOM_DEF_ID_KEY) ?? '';
+    if (customDefId) {
+      const def = (ctx.store.classroom.customPalette ?? []).find((d) => d.id === customDefId);
+      if (def === undefined) return;
+
+      const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
+      if (cell === undefined) return;
+
+      const G = ctx.store.classroom.cellsPerUnit;
+      const fw = def.wUnits * G;
+      const fh = def.hUnits * G;
+
+      if (!inBounds(cell, fw, fh, ctx.store.classroom.gridW, ctx.store.classroom.gridH)) return;
+
+      const dropOriginPx = ctx.canvas.originOffset * ctx.canvas.cellSize;
+
+      if (hasCollision(cell, fw, fh, ctx.store.classroom.furniture)) {
+        dropCollisionFlash = true;
+        selectedRect = {
+          x: cell.x * ctx.canvas.cellSize + dropOriginPx,
+          y: cell.y * ctx.canvas.cellSize + dropOriginPx,
+          w: fw * ctx.canvas.cellSize,
+          h: fh * ctx.canvas.cellSize,
+        };
+        ctx.canvas.requestRepaint();
+        setTimeout(() => {
+          dropCollisionFlash = false;
+          repaintFn?.();
+        }, 400);
+        return;
+      }
+
+      const customFurniture: Furniture = {
+        id: furnitureId(crypto.randomUUID()),
+        kind: 'custom',
+        pos: cell,
+        w: fw,
+        h: fh,
+        rotation: 0,
+        imageUrl: def.imageUrl,
+        occupants: [],
+      };
+      ctx.store.addFurniture(customFurniture);
+      selectedId = customFurniture.id;
+      selectedRect = {
+        x: cell.x * ctx.canvas.cellSize + dropOriginPx,
+        y: cell.y * ctx.canvas.cellSize + dropOriginPx,
+        w: fw * ctx.canvas.cellSize,
+        h: fh * ctx.canvas.cellSize,
+      };
+      ctx.canvas.requestRepaint();
+      return;
+    }
 
     // Read the furniture kind from dataTransfer (drop event always allows getData)
     let kind = e.dataTransfer?.getData(DRAG_KIND_KEY) ?? '';
@@ -1461,6 +1889,44 @@ export const FurnitureEditor: EditorMode = {
   // ---- §13.1 dragover — live palette preview on the canvas ------------------
 
   onDragOver(e: DragEvent, ctx: EditorContext): void {
+    // §8.C1 — Check for custom-def drag first (stash carries the def id)
+    const customDefId = readDraggedCustomDefId(e);
+    if (customDefId) {
+      const def = (ctx.store.classroom.customPalette ?? []).find((d) => d.id === customDefId);
+      if (def === undefined) return;
+
+      const cell = ctx.canvas.cellAt(e.clientX, e.clientY);
+      if (cell === undefined) {
+        if (paletteDragPreview !== null) {
+          paletteDragPreview = null;
+          ctx.canvas.requestRepaint();
+        }
+        return;
+      }
+
+      const G = ctx.store.classroom.cellsPerUnit;
+      const fw = def.wUnits * G;
+      const fh = def.hUnits * G;
+      const valid =
+        inBounds(cell, fw, fh, ctx.store.classroom.gridW, ctx.store.classroom.gridH) &&
+        !hasCollision(cell, fw, fh, ctx.store.classroom.furniture);
+
+      const prev = paletteDragPreview;
+      const changed =
+        prev?.kind !== 'custom' ||
+        prev.previewPos.x !== cell.x ||
+        prev.previewPos.y !== cell.y ||
+        prev.w !== fw ||
+        prev.h !== fh ||
+        prev.valid !== valid ||
+        prev.imageUrl !== def.imageUrl;
+      if (changed) {
+        paletteDragPreview = { kind: 'custom', previewPos: cell, w: fw, h: fh, valid, imageUrl: def.imageUrl };
+        ctx.canvas.requestRepaint();
+      }
+      return;
+    }
+
     // Read the furniture kind — falls back to the module-level stash in Firefox/Safari
     // where getData() returns "" during dragover (see readDraggedKind).
     const kind = readDraggedKind(e);
@@ -1515,8 +1981,9 @@ export const FurnitureEditor: EditorMode = {
   // ---- §13.1 dragend — clear palette preview on drag end -------------------
 
   onDragEnd(_e: DragEvent, ctx: EditorContext): void {
-    // Clear the cross-browser stash so it never bleeds to a later drag.
+    // Clear the cross-browser stashes so they never bleed to a later drag.
     clearDraggedKindStash();
+    clearDraggedCustomDefIdStash();
     if (paletteDragPreview !== null) {
       paletteDragPreview = null;
       ctx.canvas.requestRepaint();

@@ -256,14 +256,15 @@ describe('TopBar — unknown saveStatus fallback', () => {
     expect(screen.getByText('● unknown-garbage')).toBeInTheDocument();
   });
 
-  it('applies the fallback colour #555 for an unrecognised saveStatus', () => {
+  it('uses topBarRightText (themed) color for an unrecognised saveStatus (§11.A5)', () => {
     act(() => { usePijonStore.setState({ saveStatus: 'unknown-garbage' as 'saved' }); });
     const ctx = makeCtx();
     render(React.createElement(TopBar, { activeEditor: fakeEditor, ctx }));
 
     const span = screen.getByText('● unknown-garbage');
-    // The fallback colour is #555 (STATUS_COLOR[unknown] ?? '#555')
-    expect(span.style.color).toBe('rgb(85, 85, 85)');
+    // §11.A5 — color is now always the themed topBarRightText token (CSS var),
+    // guaranteed legible on topBarRight in all schemes.
+    expect(span.style.color).toContain('--pj-topBarRightText');
   });
 
   it('does NOT apply pijon-saving-pulse for an unrecognised saveStatus', () => {

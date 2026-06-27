@@ -1,0 +1,15 @@
+{
+  "name": "Purple/Green",
+  "topBar": "#84659a",
+  "leftBar": "#48765d",
+  "gridBackdrop": "#939598",
+  "text": "#fff",
+  "buttonText": "#fff",
+  "studentName": "#000000",
+  "gridBackground": "#ffffff",
+  "selectedBox": "#793498",
+  "unselectedBox": "#371e42",
+  "topBarRight": "#553726",
+  "topBarRightText": "#ffffff",
+  "logo": null
+}

@@ -232,27 +232,27 @@ describe('A. themes.ts — THEMES registry', () => {
   });
 
   it('A3: purpleGreen.appBackground is #939598 (spec hex)', () => {
-    expect(THEMES.purpleGreen.appBackground).toBe('#939598');
+    expect(THEMES.purpleGreen!.appBackground).toBe('#939598');
   });
 
   it('A4: purpleGreen.toolbarBackground is #84659a (spec hex)', () => {
-    expect(THEMES.purpleGreen.toolbarBackground).toBe('#84659a');
+    expect(THEMES.purpleGreen!.toolbarBackground).toBe('#84659a');
   });
 
   it('A5: purpleGreen.sidePanelBackground is #48765d (spec hex)', () => {
-    expect(THEMES.purpleGreen.sidePanelBackground).toBe('#48765d');
+    expect(THEMES.purpleGreen!.sidePanelBackground).toBe('#48765d');
   });
 
   it('A6: classic.appBackground is #f0f0f0 (unchanged from pre-theme)', () => {
-    expect(THEMES.classic.appBackground).toBe('#f0f0f0');
+    expect(THEMES.classic!.appBackground).toBe('#f0f0f0');
   });
 
   it('A7: classic.toolbarBackground is #f5f5f5', () => {
-    expect(THEMES.classic.toolbarBackground).toBe('#f5f5f5');
+    expect(THEMES.classic!.toolbarBackground).toBe('#f5f5f5');
   });
 
   it('A8: classic.sidePanelBackground is #fafafa', () => {
-    expect(THEMES.classic.sidePanelBackground).toBe('#fafafa');
+    expect(THEMES.classic!.sidePanelBackground).toBe('#fafafa');
   });
 
   it('A9: DEFAULT_THEME_ID is classic', () => {
@@ -271,12 +271,16 @@ describe('A. themes.ts — THEMES registry', () => {
       'sidePanelHeaderText',
       'shellBackground',
       'logoText',
+      // §10.A3/A4 — new scheme values
+      'selectedBox',
+      'unselectedBox',
       'gridBackground',
       'gridLine',
       'gridLineSubunit',
     ];
-    for (const id of Object.keys(THEMES) as ThemeId[]) {
+    for (const id of Object.keys(THEMES)) {
       const palette = THEMES[id];
+      if (palette === undefined) continue; // type guard for noUncheckedIndexedAccess
       for (const field of requiredFields) {
         expect(
           typeof palette[field],
@@ -288,16 +292,16 @@ describe('A. themes.ts — THEMES registry', () => {
 
   it('A11: getActiveThemeColors() returns classic palette by default (gridBackground)', () => {
     // Reset to classic before the test
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
     const colors = getActiveThemeColors();
-    expect(colors.gridBackground).toBe(THEMES.classic.gridBackground);
+    expect(colors.gridBackground).toBe(THEMES.classic!.gridBackground);
   });
 
   it('A12: _setActiveThemeInternal changes what getActiveThemeColors returns', () => {
-    _setActiveThemeInternal(THEMES.purpleGreen);
-    expect(getActiveThemeColors().gridBackground).toBe(THEMES.purpleGreen.gridBackground);
+    _setActiveThemeInternal(THEMES.purpleGreen!);
+    expect(getActiveThemeColors().gridBackground).toBe(THEMES.purpleGreen!.gridBackground);
     // Restore
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
   });
 });
 
@@ -312,52 +316,52 @@ describe('B. applyThemeVars — CSS custom properties', () => {
   });
 
   it('B1: sets --pj-appBackground on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-appBackground')).toBe('#939598');
   });
 
   it('B2: sets --pj-toolbarBackground on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-toolbarBackground')).toBe('#84659a');
   });
 
   it('B3: sets --pj-sidePanelBackground on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-sidePanelBackground')).toBe('#48765d');
   });
 
   it('B4: sets --pj-toolbarBorder on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-toolbarBorder')).toBeTruthy();
   });
 
   it('B5: sets --pj-panelBorder on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-panelBorder')).toBeTruthy();
   });
 
   it('B6: sets --pj-btnText on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-btnText')).toBeTruthy();
   });
 
   it('B7: sets --pj-sidePanelHeaderText on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-sidePanelHeaderText')).toBeTruthy();
   });
 
   it('B8: sets --pj-shellBackground on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-shellBackground')).toBeTruthy();
   });
 
   it('B9: sets --pj-logoText on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-logoText')).toBeTruthy();
   });
 
   it('B10: purpleGreen palette sets the three spec hexes on documentElement', () => {
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     expect(document.documentElement.style.getPropertyValue('--pj-appBackground')).toBe('#939598');
     expect(document.documentElement.style.getPropertyValue('--pj-toolbarBackground')).toBe('#84659a');
     expect(document.documentElement.style.getPropertyValue('--pj-sidePanelBackground')).toBe('#48765d');
@@ -365,9 +369,9 @@ describe('B. applyThemeVars — CSS custom properties', () => {
 
   it('B11: applying classic palette restores classic values', () => {
     // Apply purple/green first
-    applyThemeVars(THEMES.purpleGreen);
+    applyThemeVars(THEMES.purpleGreen!);
     // Then apply classic
-    applyThemeVars(THEMES.classic);
+    applyThemeVars(THEMES.classic!);
     expect(document.documentElement.style.getPropertyValue('--pj-appBackground')).toBe('#f0f0f0');
     expect(document.documentElement.style.getPropertyValue('--pj-toolbarBackground')).toBe('#f5f5f5');
     expect(document.documentElement.style.getPropertyValue('--pj-sidePanelBackground')).toBe('#fafafa');
@@ -383,14 +387,14 @@ describe('C. Store — themeId state and persistence', () => {
     lsStub = makeLocalStorageStub();
     vi.stubGlobal('localStorage', lsStub);
     // Reset canvas palette to classic before each test
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
     resetDocumentElementStyle();
     resetStore();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     // Restore classic in the canvas palette cache after each test
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
     resetDocumentElementStyle();
     cleanup();
   });
@@ -439,11 +443,11 @@ describe('C. Store — themeId state and persistence', () => {
 
   it('C9: setTheme updates the module-level canvas palette (getActiveThemeColors)', () => {
     act(() => { usePijonStore.getState().setTheme('purpleGreen'); });
-    expect(getActiveThemeColors().gridBackground).toBe(THEMES.purpleGreen.gridBackground);
+    expect(getActiveThemeColors().gridBackground).toBe(THEMES.purpleGreen!.gridBackground);
 
     // Restore
     act(() => { usePijonStore.getState().setTheme('classic'); });
-    expect(getActiveThemeColors().gridBackground).toBe(THEMES.classic.gridBackground);
+    expect(getActiveThemeColors().gridBackground).toBe(THEMES.classic!.gridBackground);
   });
 
   it('C10: setTheme calls applyThemeVars (CSS vars are set on documentElement)', () => {
@@ -467,13 +471,13 @@ describe('D. SettingsMenu — theme picker', () => {
   beforeEach(() => {
     lsStub = makeLocalStorageStub();
     vi.stubGlobal('localStorage', lsStub);
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
     resetDocumentElementStyle();
     resetStore();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
     resetDocumentElementStyle();
     cleanup();
   });
@@ -570,23 +574,25 @@ describe('E. Canvas — resolved palette via getActiveThemeColors', () => {
   beforeEach(() => {
     lsStub = makeLocalStorageStub();
     vi.stubGlobal('localStorage', lsStub);
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
     resetDocumentElementStyle();
     resetStore();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
     resetDocumentElementStyle();
     cleanup();
   });
 
-  it('E1: after setTheme(purpleGreen), getActiveThemeColors().gridBackground differs from classic', () => {
-    const classicBg = THEMES.classic.gridBackground;
+  it('E1: after setTheme(purpleGreen), getActiveThemeColors().gridBackground matches THEMES.purpleGreen (§11.A3)', () => {
+    // §11.A3: gridBackground is now an explicit scheme value (white = #ffffff in both shipped
+    // schemes). The resolved palette always reflects the scheme value — previously it was
+    // derived from gridBackdrop so the two schemes produced different values; now both are white.
     act(() => { usePijonStore.getState().setTheme('purpleGreen'); });
     const activeBg = getActiveThemeColors().gridBackground;
-    expect(activeBg).not.toBe(classicBg);
-    expect(activeBg).toBe(THEMES.purpleGreen.gridBackground);
+    expect(activeBg).toBe(THEMES.purpleGreen!.gridBackground);
+    expect(activeBg).toBe('#ffffff'); // explicit white in both shipped schemes
   });
 
   it('E2: after setTheme(classic), getActiveThemeColors().gridBackground matches classic', () => {
@@ -594,12 +600,12 @@ describe('E. Canvas — resolved palette via getActiveThemeColors', () => {
     act(() => { usePijonStore.getState().setTheme('purpleGreen'); });
     // Then back to classic
     act(() => { usePijonStore.getState().setTheme('classic'); });
-    expect(getActiveThemeColors().gridBackground).toBe(THEMES.classic.gridBackground);
+    expect(getActiveThemeColors().gridBackground).toBe(THEMES.classic!.gridBackground);
   });
 
   it('E3: clearCanvas fills with the active theme gridBackground (not a CSS var string)', () => {
     // Set purpleGreen so the fill differs from classic
-    _setActiveThemeInternal(THEMES.purpleGreen);
+    _setActiveThemeInternal(THEMES.purpleGreen!);
 
     const spyCtx = makeSpyCtx() as CanvasRenderingContext2D & SpyCtx;
     clearCanvas(spyCtx, 100, 100);
@@ -608,14 +614,14 @@ describe('E. Canvas — resolved palette via getActiveThemeColors', () => {
     const { fillStyle } = spyCtx;
     expect(typeof fillStyle).toBe('string');
     expect((fillStyle as string).startsWith('var(')).toBe(false);
-    expect(fillStyle).toBe(THEMES.purpleGreen.gridBackground);
+    expect(fillStyle).toBe(THEMES.purpleGreen!.gridBackground);
 
     // Restore
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
   });
 
   it('E4: drawGrid uses the active theme gridLine for unit-boundary strokeStyle', () => {
-    _setActiveThemeInternal(THEMES.purpleGreen);
+    _setActiveThemeInternal(THEMES.purpleGreen!);
 
     const spyCtx = makeSpyCtx() as CanvasRenderingContext2D & SpyCtx;
     // Track strokeStyle assignments
@@ -629,17 +635,17 @@ describe('E. Canvas — resolved palette via getActiveThemeColors', () => {
     drawGrid(spyCtx, 4, 4, 24, 1);
 
     // The first strokeStyle set should be the unit-boundary gridLine from the theme
-    expect(strokeStyles.some((s) => s === THEMES.purpleGreen.gridLine)).toBe(true);
+    expect(strokeStyles.some((s) => s === THEMES.purpleGreen!.gridLine)).toBe(true);
     // It must not be a CSS var string
     for (const s of strokeStyles) {
       expect(s.startsWith('var(')).toBe(false);
     }
 
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
   });
 
   it('E5: drawGrid uses the active theme gridLineSubunit for sub-unit lines (G=2)', () => {
-    _setActiveThemeInternal(THEMES.purpleGreen);
+    _setActiveThemeInternal(THEMES.purpleGreen!);
 
     const spyCtx = makeSpyCtx() as CanvasRenderingContext2D & SpyCtx;
     const strokeStyles: string[] = [];
@@ -653,12 +659,12 @@ describe('E. Canvas — resolved palette via getActiveThemeColors', () => {
     drawGrid(spyCtx, 4, 4, 12, 2);
 
     // Sub-unit color must appear (tier 1)
-    expect(strokeStyles.some((s) => s === THEMES.purpleGreen.gridLineSubunit)).toBe(true);
+    expect(strokeStyles.some((s) => s === THEMES.purpleGreen!.gridLineSubunit)).toBe(true);
     // None of the strokeStyle values should be a CSS var
     for (const s of strokeStyles) {
       expect(s.startsWith('var(')).toBe(false);
     }
 
-    _setActiveThemeInternal(THEMES.classic);
+    _setActiveThemeInternal(THEMES.classic!);
   });
 });

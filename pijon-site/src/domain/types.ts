@@ -43,9 +43,11 @@ export interface Vec2 {
  * - table        — multi-seat; capacity = numSeats field on Furniture
  * - teacher_desk — fixture, capacity 0
  * - whiteboard   — fixture, capacity 0
+ * - custom       — teacher-imported image furniture, decorative, capacity 0
  */
 export type FurnitureKind =
   | 'single_desk'
   | 'table'
   | 'teacher_desk'
-  | 'whiteboard';
+  | 'whiteboard'
+  | 'custom';

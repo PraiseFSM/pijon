@@ -1,0 +1,20 @@
+/*
+ * index.css — global reset.
+ *
+ * The app shell (App.tsx) is a full-viewport flex column sized to 100vh, but
+ * browsers apply a default `body { margin: 8px }`, which pushed the shell down
+ * and right, leaving an ugly gap (and a scrollbar) around the whole site.
+ * Zero the margin/padding and let html/body/#root fill the viewport so the
+ * shell sits flush against every edge.
+ *
+ * Intentionally minimal — no global box-sizing change, to avoid shifting the
+ * app's many explicitly-sized, padded panels/toolbars.
+ */
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}

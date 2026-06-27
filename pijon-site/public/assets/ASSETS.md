@@ -22,6 +22,7 @@
 | Classroom background (drawn behind grid lines in render.ts — §14.4; plain white by default) | 64 × 64 px (tiles/stretches) | any | PNG | `classroom-background.png` |
 | App favicon (tab icon + PWA shortcut; referenced from `index.html`) | 32 × 32 (SVG is resolution-independent) | 1:1 | SVG | `favicon.svg` |
 | Grid-color-button icon (the button that opens the grid color picker — §14.5; solid purple placeholder) | 32 × 32 px | 1:1 | PNG | `grid-color-button.png` |
+| **Logo** — replaces the "Pijon" wordmark in the top-left of the top bar (§8.B3). Set the `logo` field in a scheme JSON file to `/assets/pijon-logo.png` to activate. When `logo` is `null` in the scheme, the literal text "Pijon" is shown instead. Missing/broken image falls back gracefully to the text "Pijon" (alt text). | up to 80 × 24 px (scaled to fit) | any | PNG or SVG | `pijon-logo.png` (or any path set in the scheme JSON) |
 
 ---
 
