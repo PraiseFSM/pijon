@@ -378,20 +378,22 @@ Furniture = lever OFF/left; Students = lever ON/right. Active side bold + select
 
 All bug fixes to existing theming (no outline change). One cluster, builder + checker.
 
-**Cluster A — Theme application correctness.** Files: `theme/themes.ts`, `state/store.ts`, `ui/App.tsx`,
-`ui/shell/TopBar.tsx`, `ui/editors/FurnitureEditor.tsx`/`StudentEditor.tsx` (toolbar button text), `ui/canvas/ClassroomCanvas.tsx`.
-- [ ] **12.A1 Toolbar button text not using `buttonText`** — the Furniture toolbar buttons (New/Clear/Save/Load)
-  and Student toolbar buttons (Clear/Undo/Redo/Export/Import) don't pick up the scheme `buttonText` color.
-  Route their text to the themed `buttonText` token.
-- [ ] **12.A2 Theme not fully applied on load (must toggle to apply) — CORE BUG.** On first load the persisted
-  theme isn't fully applied — DOM may theme but the CANVAS (student names, grid) doesn't until you switch themes
-  back and forth. Root cause likely: the module-level resolved palette (`_activeTheme` / `getActiveThemeColors`)
-  is not initialized to the persisted `themeId` on startup (only `setTheme` updates it), so first paint uses the
-  default palette. Fix init so the persisted theme is FULLY applied on mount — DOM vars (`applyThemeVars`) AND the
-  canvas resolved palette (`_setActiveThemeInternal`) AND a canvas repaint — with no toggle needed. Add a test
-  that a persisted non-default theme is reflected on first render (DOM + canvas) without calling setTheme.
-- [ ] **12.A3 Roster student names → scheme `text`.** The roster list (left panel, DOM) student names should use
-  the scheme `text` color (canvas grid names stay `studentName` black — that's separate). Tests + checker.
+**Cluster A — Theme application correctness. ✅ COMPLETE 2026-06-27.** Builder + checker; verified suite 2009
+green, tsc 0, eslint 0, build 0. No source defects in the checker pass, but the checker caught WEAK builder tests
+(they called the theme-sync functions themselves, so the 12.A2 fix wasn't actually proven) and added real
+first-load tests via `vi.resetModules()` + dynamic import (RED without the fix). Tests: `iteration12_clusterA.test.tsx` (25).
+- [x] **12.A1 Toolbar button text → `buttonText`.** Furniture (New/Clear/Save/Load) + Student (Clear/Undo/Redo/
+  Export/Import) toolbar `btn` styles now `color: var(--pj-buttonText)`.
+- [x] **12.A2 CORE BUG fixed: theme fully applied on first load (no toggle).** Root cause confirmed — `_activeTheme`
+  (canvas palette) stayed `classic` until `setTheme`. Fix: `store.ts` synchronously calls `_setActiveThemeInternal`
+  + `applyThemeVars` for the persisted theme at MODULE-IMPORT time (before first render), so canvas + DOM are correct
+  on first paint. No test pollution (beforeEach/afterEach reset documentElement). Runtime switch path (Iteration 10)
+  unaffected.
+- [x] **12.A3 Roster student names → scheme `text`** (`var(--pj-text)`); canvas grid names stay `studentName` black.
+
+> **Iteration 12 COMPLETE (2026-06-27).** Theming bug-fix round: toolbar button text themed, persisted theme now
+> applies fully on first load (the "switch back and forth" canvas bug), roster names follow `text`. Suite:
+> **2009 tests green**, tsc 0, eslint 0, build 0.
 
 ## Deferred tests (write later)
 

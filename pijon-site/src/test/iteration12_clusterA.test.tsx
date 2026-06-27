@@ -311,6 +311,48 @@ describe('A. 12.A2: Persisted theme fully applied on first load', () => {
     // The classic palette has toolbarBackground = #f5f5f5
     expect(colors.toolbarBackground).toBe('#f5f5f5');
   });
+
+  it('A9: module-init truly sets purpleGreen canvas palette at import time (first-load proof)', async () => {
+    // Set localStorage BEFORE re-importing the store module so the module-level
+    // init code (the actual 12.A2 fix) reads purpleGreen from localStorage when
+    // the module is first evaluated.
+    // This test would FAIL if the _setActiveThemeInternal call were removed from
+    // the module-init block in store.ts — proving the fix is necessary.
+    lsStub.setItem('pijon_themeId', 'purpleGreen');
+    vi.resetModules();
+    // Re-import themes first (so the THEMES registry is fresh), then the store
+    // (so its module-init runs with purpleGreen in localStorage).
+    const themesModule = await import('../theme/themes.js');
+    await import('../state/store.js');
+    // After the fresh store import the canvas palette must reflect purpleGreen
+    const colors = themesModule.getActiveThemeColors();
+    const pgPalette = themesModule.THEMES.purpleGreen;
+    expect(pgPalette).toBeDefined();
+    expect(colors.toolbarBackground).toBe(pgPalette?.toolbarBackground);
+    expect(colors.text).toBe(pgPalette?.text);
+    // Must differ from classic — confirming it isn't just the default
+    expect(colors.toolbarBackground).not.toBe(themesModule.THEMES.classic?.toolbarBackground);
+  });
+
+  it('A10: module-init truly sets purpleGreen DOM vars at import time (first-load proof)', async () => {
+    // Same re-import strategy as A9. After fresh store import with purpleGreen
+    // in localStorage the DOM CSS vars must be set to purpleGreen values.
+    // This test would FAIL if the applyThemeVars call were removed from the
+    // module-init block in store.ts.
+    lsStub.setItem('pijon_themeId', 'purpleGreen');
+    vi.resetModules();
+    const themesModule = await import('../theme/themes.js');
+    await import('../state/store.js');
+    const pgPalette = themesModule.THEMES.purpleGreen;
+    expect(pgPalette).toBeDefined();
+    const root = document.documentElement;
+    const toolbarVar = root.style.getPropertyValue('--pj-toolbarBackground');
+    const textVar = root.style.getPropertyValue('--pj-text');
+    expect(toolbarVar).toBe(pgPalette?.toolbarBackground);
+    expect(textVar).toBe(pgPalette?.text);
+    // Must differ from classic values
+    expect(toolbarVar).not.toBe(themesModule.THEMES.classic?.toolbarBackground);
+  });
 });
 
 // ---------------------------------------------------------------------------
