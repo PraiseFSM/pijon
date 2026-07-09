@@ -1,0 +1,59 @@
+name: Deploy to GitHub Pages
+
+# Builds the Vite app in pijon-site/ and publishes its dist/ to GitHub Pages.
+# Runs on every push to main (and can be triggered manually).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Permissions the GitHub Pages deploy needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deploy at a time; a newer push cancels an in-progress one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pijon-site
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: pijon-site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (static, base=/pijon/ from vite.config.ts)
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Path is relative to the repo root (not the working-directory default).
+          path: pijon-site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

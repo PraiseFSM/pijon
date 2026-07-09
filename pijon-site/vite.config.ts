@@ -31,7 +31,19 @@ import { VitePWA } from 'vite-plugin-pwa';
 //     making it correct for both root and subpath deployments.
 //   • Icon src paths use './' for the same reason. vite-plugin-pwa resolves them
 //     against the build base automatically.
-export default defineConfig({
+// Config is a function so we can read Vite's `mode`: `vite build` runs in
+// 'production', Vitest runs in 'test'. We only apply the /pijon/ base for real
+// builds; tests stay at '/' so BASE_URL-derived asset-path assertions are
+// deploy-agnostic.
+export default defineConfig(({ mode }) => ({
+  // §8.D7 — GitHub Pages PROJECT site at https://praisefsm.github.io/pijon/.
+  // The repo is named `pijon`, so the site is served under the /pijon/ subpath.
+  // Vite rewrites all JS/CSS asset URLs to this base, and src/assets/paths.ts +
+  // the PWA manifest already use relative / BASE_URL paths so public/ assets and
+  // the service worker resolve correctly. Change this to '/' for a root deploy
+  // (custom domain, Netlify/Cloudflare, or a user/org github.io site).
+  //
+  base: mode === 'test' ? '/' : '/pijon/',
   plugins: [
     react(),
     VitePWA({
@@ -102,4 +114,4 @@ export default defineConfig({
       reporter: ['text', 'json-summary'],
     },
   },
-});
+}));
