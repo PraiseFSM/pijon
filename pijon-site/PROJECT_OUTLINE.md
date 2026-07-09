@@ -341,5 +341,5 @@ that process is itself a design goal: it must stay legible, testable, and repeat
    piece (see *Development Philosophy* above), checking every change back against the Design Goals,
    and pairing each build with a checker agent that tests it.
 
-Prior art that informed these goals lives in the original PyQt prototype:
-`../pijon-app/docs/ARCHITECTURE.md` and `../pijon-app/docs/RESTRUCTURE_PLAN.md`.
+These goals were informed by an original PyQt prototype (since removed from the repo). Pijon Web is
+now the sole product; the prototype's architecture notes are preserved only in git history.
