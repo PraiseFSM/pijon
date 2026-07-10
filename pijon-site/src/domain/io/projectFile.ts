@@ -56,7 +56,7 @@ import type { CustomFurnitureDef } from '../classroom.js';
 import { furnitureId, studentId } from '../types.js';
 import { makeFixture } from '../student.js';
 import { assignOccupant } from '../furniture.js';
-import { assignments, fixtures, DEFAULT_THRESHOLD_UNITS, DEFAULT_CELLS_PER_UNIT } from '../classroom.js';
+import { assignments, fixtures, DEFAULT_THRESHOLD_UNITS, DEFAULT_CELLS_PER_UNIT, fixtureId } from '../classroom.js';
 
 /** Current schema version — increment when the format changes. */
 export const CURRENT_VERSION = 2;
@@ -442,6 +442,41 @@ export function composeClassroom(pf: ProjectFile): LoadedProject {
     hUnits: d.hUnits,
   }));
 
+  // 13.A4 — Backward-compat migration: auto-add fixture occupants to any
+  // teacher_desk / whiteboard that loaded without one. This makes the feature
+  // work for existing rooms without breaking or duplicating existing state.
+  //
+  // For each fixture-kind piece that lacks a fixtureOccupant in the file:
+  //  - Create a fixture Student (unique id per piece via name + ':' + fid).
+  //  - Assign it as the occupant of the furniture piece.
+  //  - Add it to the roster (only if not already there — idempotent).
+  //  - Add the furniture id to locks (fixture pieces are always locked).
+  const autoLocks = new Set<FurnitureId>(pf.locks.map(furnitureId));
+
+  for (let i = 0; i < furnitureList.length; i++) {
+    const piece = furnitureList[i];
+    if (piece === undefined) continue;
+    if (piece.kind !== 'teacher_desk' && piece.kind !== 'whiteboard') continue;
+    // Skip pieces that already have a fixture occupant (loaded from the file above)
+    if (piece.occupants.length > 0) {
+      // Already has occupant — ensure it is locked
+      autoLocks.add(piece.id);
+      continue;
+    }
+    // No occupant — auto-populate one
+    const fixtureName = piece.kind === 'teacher_desk' ? "Teacher's Desk" : 'Whiteboard';
+    const fxId = fixtureId(`${fixtureName}:${piece.id}`);
+    // Check if this id is already in the roster (shouldn't happen, but be safe)
+    let fix = roster.find((s) => s.id === fxId);
+    if (fix === undefined) {
+      fix = makeFixture(fxId, fixtureName);
+      roster.push(fix);
+      studentById.set(fxId, fix);
+    }
+    furnitureList[i] = assignOccupant(piece, fix);
+    autoLocks.add(piece.id);
+  }
+
   const classroom: Classroom = {
     id: pf.classroom.id,
     name: pf.classroom.name,
@@ -455,7 +490,7 @@ export function composeClassroom(pf: ProjectFile): LoadedProject {
     customPalette,
   };
 
-  const locks: FurnitureId[] = pf.locks.map(furnitureId);
+  const locks: FurnitureId[] = Array.from(autoLocks);
 
   return { classroom, roster, locks };
 }

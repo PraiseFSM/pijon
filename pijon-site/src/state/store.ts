@@ -51,7 +51,7 @@ import {
   pruneOrphanStudentPrefs,
 } from '../domain/preference.js';
 import type { Furniture } from '../domain/furniture.js';
-import { assignOccupant, vacate, capacity, isFixture } from '../domain/furniture.js';
+import { assignOccupant, vacate, capacity, isFixture, occupant as furnitureOccupant } from '../domain/furniture.js';
 import type { Classroom } from '../domain/classroom.js';
 import type { GridEdge } from '../domain/classroom.js';
 import type { CustomFurnitureDef } from '../domain/classroom.js';
@@ -747,10 +747,29 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
   // ---- Furniture -----------------------------------------------------------
 
   addFurniture(f: Furniture) {
-    set((s) => ({
-      classroom: domainAddFurniture(s.classroom, f),
-      saveStatus: 'dirty',
-    }));
+    set((s) => {
+      const newClassroom = domainAddFurniture(s.classroom, f);
+      // 13.A1 — if the new piece carries a fixture occupant, add it to the roster
+      // and lock the piece so the allocator never moves it.
+      const fixtureOcc = furnitureOccupant(f);
+      if (fixtureOcc?.isFixture === true) {
+        // Only add to roster if not already present (idempotent for safety)
+        const alreadyInRoster = s.roster.some((st) => st.id === fixtureOcc.id);
+        const newRoster = alreadyInRoster ? s.roster : [...s.roster, fixtureOcc];
+        const newLocks = new Set(s.locks);
+        newLocks.add(f.id);
+        return {
+          classroom: newClassroom,
+          roster: newRoster,
+          locks: newLocks,
+          saveStatus: 'dirty' as const,
+        };
+      }
+      return {
+        classroom: newClassroom,
+        saveStatus: 'dirty' as const,
+      };
+    });
   },
 
   moveFurniture(id: FurnitureId, pos: Vec2) {
@@ -765,8 +784,18 @@ export const usePijonStore = create<PijonStore>()((set, get) => ({
     set((s) => {
       const newLocks = new Set(s.locks);
       newLocks.delete(id);
+      // 13.A3 — if the furniture has a fixture occupant, remove it from roster
+      // and prune any prefs that reference it.
+      const furniturePiece = s.classroom.furniture.find((f) => f.id === id);
+      const fixtureOcc = furniturePiece !== undefined ? furnitureOccupant(furniturePiece) : undefined;
+      let newRoster = s.roster;
+      if (fixtureOcc?.isFixture === true) {
+        const withoutFixture = s.roster.filter((st) => st.id !== fixtureOcc.id);
+        newRoster = pruneOrphanStudentPrefs(withoutFixture);
+      }
       return {
         classroom: domainRemoveFurniture(s.classroom, id),
+        roster: newRoster,
         locks: newLocks,
         saveStatus: 'dirty',
       };

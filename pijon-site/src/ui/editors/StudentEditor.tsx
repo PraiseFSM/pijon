@@ -2276,15 +2276,25 @@ export const StudentEditor: EditorMode = {
 
     if (assignerModeActive) {
       // ---- Assigner (marker) mode flow ------------------------------------
+      // 13.A2 — fixture-occupied desks (teacher_desk / whiteboard) are valid
+      // assigner targets. A fixture occupant can participate in a preference
+      // pair as long as at least one side is a real student. Fixture↔fixture
+      // is a no-op (setMutualPreference short-circuits on self-target or when
+      // neither id is in the roster as a real student — the roster update
+      // short-circuits because both are fixtures and we guard below).
       const f = findDraggableFurnitureAt(cell, ctx.store.classroom.furniture);
       if (f === null) return;
 
       const occ = occupant(f);
-      if (occ === undefined || occ.isFixture) return;
-      if (isFurnitureFixture(f) || capacity(f) === 0) return;
+      // Must have some occupant (real or fixture)
+      if (occ === undefined) return;
+      // Must be occupied: either a real student OR a fixture on a fixture-kind piece
+      const occIsFixture = occ.isFixture;
+      // Reject unoccupied fixture-kind pieces (capacity 0 and no occupant)
+      if (!occIsFixture && capacity(f) === 0) return;
 
       if (markerFirstFid === null) {
-        // Step 1: select first student — push name into toolbar hint (§13.6)
+        // Step 1: select first occupant — push name into toolbar hint (§13.6)
         markerFirstFid = f.id;
         markerFirstStudent = occ;
         // Notify the React hint component
@@ -2303,7 +2313,10 @@ export const StudentEditor: EditorMode = {
         const student1 = markerFirstStudent;
         const student2 = occ;
 
-        if (student1 !== null) {
+        // 13.A2 — require at least one real student in the pair.
+        // fixture↔fixture is a no-op (no meaningful preference to record).
+        const bothAreFixtures = student1?.isFixture === true && student2.isFixture;
+        if (student1 !== null && !bothAreFixtures) {
           ctx.store.setMutualPreference(student1.id, student2.id, currentWeight);
         }
 

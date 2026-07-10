@@ -39,7 +39,9 @@ import type { EditorContext, EditorMode, CanvasView } from './EditorMode.js';
 import type { FurnitureKind, Vec2 } from '../../domain/types.js';
 import { furnitureId } from '../../domain/types.js';
 import type { Furniture } from '../../domain/furniture.js';
-import { occupiedCells } from '../../domain/furniture.js';
+import { occupiedCells, assignOccupant } from '../../domain/furniture.js';
+import { makeFixture } from '../../domain/student.js';
+import { fixtureId } from '../../domain/classroom.js';
 import { furnitureToPixelRect } from '../canvas/hitTest.js';
 import { resizeButtonRects, hitButton, ghostRingCells, type ResizeButton } from '../canvas/ghostRing.js';
 import { usePijonStore } from '../../state/store.js';
@@ -168,8 +170,9 @@ function makeFurniture(kind: FurnitureKind, pos: Vec2, cellsPerUnit = 1): Furnit
   const meta = PALETTE_ITEMS.find((m) => m.kind === kind);
   const w = (meta?.w ?? 1) * cellsPerUnit;
   const h = (meta?.h ?? 1) * cellsPerUnit;
+  const fid = furnitureId(crypto.randomUUID());
   const base: Furniture = {
-    id: furnitureId(crypto.randomUUID()),
+    id: fid,
     kind,
     pos,
     w,
@@ -179,6 +182,19 @@ function makeFurniture(kind: FurnitureKind, pos: Vec2, cellsPerUnit = 1): Furnit
   };
   if (kind === 'table') {
     return { ...base, numSeats: 4 };
+  }
+  // 13.A1 — teacher_desk / whiteboard get a locked fixture occupant
+  // The fixture id is unique per furniture piece (name + ':' + fid) so
+  // two whiteboards each get their own roster entry — no id collision.
+  if (kind === 'teacher_desk') {
+    const fixtureName = "Teacher's Desk";
+    const fix = makeFixture(fixtureId(`${fixtureName}:${fid}`), fixtureName);
+    return assignOccupant(base, fix);
+  }
+  if (kind === 'whiteboard') {
+    const fixtureName = 'Whiteboard';
+    const fix = makeFixture(fixtureId(`${fixtureName}:${fid}`), fixtureName);
+    return assignOccupant(base, fix);
   }
   return base;
 }

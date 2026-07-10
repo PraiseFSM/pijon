@@ -90,7 +90,12 @@ The teacher stays in control of their data:
   Furniture has a size and a position. Furniture is what students attach to.
 - **Occupant** — furniture can be *occupied*. A desk holds one **student**. Other furniture can hold
   a **faux occupant** — a stand-in that represents a feature of the room ("Whiteboard", "Door") so
-  preferences can refer to it. (For now, furniture holds at most one occupant.)
+  preferences can refer to it. (For now, furniture holds at most one occupant.) **Room-feature
+  furniture is auto-populated:** placing a **Teacher's Desk** or **Whiteboard** automatically gives it
+  a **locked faux occupant** named after the piece ("Teacher's Desk" / "Whiteboard"), so a teacher can
+  immediately point student preferences at it in the assigner (e.g. "sit near the whiteboard", "keep
+  away from the teacher's desk") without any manual setup. The faux occupant is locked (it's a fixed
+  room feature — never moved or reassigned) and is removed when its furniture is deleted.
 - **Student** — a person to be seated, with a name and a set of **preferences**.
 - **Preference** — a student's like/dislike: "sit near X", "avoid Y", "near the window", with a
   strength. Preferences drive the seating suggestions. Preferences between two students are always

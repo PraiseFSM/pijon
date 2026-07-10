@@ -395,7 +395,31 @@ first-load tests via `vi.resetModules()` + dynamic import (RED without the fix).
 > applies fully on first load (the "switch back and forth" canvas bug), roster names follow `text`. Suite:
 > **2009 tests green**, tsc 0, eslint 0, build 0.
 
-## Deferred tests (write later)
+### Iteration 13 — round-11 feedback (2026-06-27)
+
+Feature. Builder + checker. (Git handled by the user — agent edits code only.)
+
+**Cluster A — Auto-populate Teacher's Desk / Whiteboard with a locked faux occupant. ✅ COMPLETE 2026-06-27.**
+Builder + checker; verified suite 2062 green, tsc 0, eslint 0, build 0. No source defects; checker added E1–E7
+(19 tests) incl. the end-to-end load→hydrate path (builder tested composeClassroom in isolation only) and a
+makeFurniture factory-coverage gap. New tests: `iteration13_clusterA.test.ts` (28), `_assigner.test.tsx` (6),
+`_extra.test.ts` (19).
+- [x] **13.A1 Auto-populate on creation.** `makeFurniture` gives teacher_desk/whiteboard a fixture occupant with
+  a **per-piece unique id** `fixtureId(name+':'+furnitureId)` (two whiteboards don't collide). `store.addFurniture`
+  adds the fixture to the roster (idempotent) + locks the piece; all creation funnels through addFurniture.
+- [x] **13.A2 Assigner accepts fixtures.** Removed the `occ.isFixture` reject; a fixture-occupied desk is a valid
+  target (both orders), `setMutualPreference(real, fixture, w)`; fixture↔fixture is a no-op; empty desks rejected;
+  amber first-click feedback works; link shows on the real student and is removable.
+- [x] **13.A3 Lifecycle + persistence.** `removeFurniture` removes the fixture from roster + prunes its prefs +
+  clears the lock; `clearArrangement` keeps fixtures; `.pijon` round-trip stable (idempotent, ids/prefs preserved);
+  capacity 0 blocks seating a real student onto it. Auto-lock does NOT block moving/deleting the piece (FurnitureEditor
+  never reads `locks`; locks only gate the allocator).
+- [x] **13.A4 Backward-compat: migrate on load.** `composeClassroom` returns roster+locks incl. fixtures added to
+  any teacher_desk/whiteboard lacking an occupant (no duplication) → old rooms gain the feature on open; `hydrate`
+  pipes roster+locks through end-to-end.
+
+> **Iteration 13 COMPLETE (2026-06-27).** Teacher's Desk / Whiteboard auto-get a locked faux occupant usable in the
+> preferences assigner. Suite: **2062 tests green**, tsc 0, eslint 0, build 0. (Git left to the user.)
 
 Tests were paused to conserve usage. Code below was shipped WITHOUT tests and needs an
 extensive Vitest suite added later (the project's standard is ~2:1 test:code). Append to this
